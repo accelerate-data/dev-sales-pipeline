@@ -1,0 +1,51 @@
+version: 2
+
+models:
+  - name: dim_account
+    description: |
+      Account dimension table for the sales pipeline mart, representing customers and prospects.
+      One row per account (SCD Type 1 - current state only).
+      Enables slicing pipeline metrics by customer attributes, industry, and location.
+    columns:
+      - name: account_id
+        description: Primary key - unique identifier for the account
+        data_type: string
+        tests:
+          - unique
+          - not_null
+
+      - name: account_name
+        description: Name of the customer or prospect company
+        data_type: string
+
+      - name: account_type
+        description: Classification of the account (e.g., Customer, Prospect, Partner)
+        data_type: string
+
+      - name: industry
+        description: Industry vertical for market segmentation analysis
+        data_type: string
+
+      - name: billing_city
+        description: City from billing address for geographic analysis
+        data_type: string
+
+      - name: billing_state
+        description: State/province from billing address for regional reporting
+        data_type: string
+
+      - name: billing_country
+        description: Country from billing address for international market analysis
+        data_type: string
+
+      - name: owner_id
+        description: Foreign key to the user who owns this account relationship
+        data_type: string
+
+      - name: created_date
+        description: When the account record was first created in Salesforce
+        data_type: timestamp
+
+      - name: last_modified_date
+        description: When the account record was last updated
+        data_type: timestamp

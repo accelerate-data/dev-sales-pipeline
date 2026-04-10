@@ -1,0 +1,74 @@
+version: 2
+
+models:
+  - name: stg_salescloud__opportunitylineitem
+    description: |
+      Staging model for Salesforce opportunity line items representing products/services sold in each opportunity.
+      Provides a 1:1 mapping with the source Salesforce OpportunityLineItem object,
+      applying column renaming to snake_case conventions.
+    columns:
+      - name: line_item_id
+        description: Unique identifier for the opportunity line item (Salesforce ID)
+        data_type: string
+        tests:
+          - unique
+          - not_null
+
+      - name: opportunity_id
+        description: Foreign key to the opportunity this line item belongs to
+        data_type: string
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_salescloud__opportunity')
+              field: opportunity_id
+
+      - name: pricebook_entry_id
+        description: Foreign key to the pricebook entry that defines pricing for this product
+        data_type: string
+
+      - name: product_id
+        description: Foreign key to the Product2 object (Product2Id in Salesforce)
+        data_type: string
+        tests:
+          - not_null
+
+      - name: product_name
+        description: Name of the product or service being sold in this line item
+        data_type: string
+
+      - name: product_code
+        description: Product code or SKU for identification and reporting
+        data_type: string
+
+      - name: quantity
+        description: Quantity of units sold for this product
+        data_type: double
+
+      - name: unit_price
+        description: Price per unit of the product
+        data_type: double
+
+      - name: total_price
+        description: Total price for this line item (typically quantity × unit price minus discount)
+        data_type: double
+
+      - name: discount
+        description: Discount amount or percentage applied to this line item
+        data_type: double
+
+      - name: description
+        description: Free-text description or notes for this line item
+        data_type: string
+
+      - name: service_date
+        description: Date when the service or product delivery is scheduled
+        data_type: string
+
+      - name: sort_order
+        description: Display order for this line item within the opportunity
+        data_type: integer
+
+      - name: created_date
+        description: Timestamp when this line item was created in Salesforce
+        data_type: string

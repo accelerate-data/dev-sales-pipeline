@@ -1,0 +1,17 @@
+version: 2
+
+sources:
+  - name: salescloud
+    database: '`sampledata`.`salesforce`'
+    schema: salescloud
+    tables:
+      - name: opportunity
+        description: Salesforce opportunity records representing sales pipeline
+      - name: account
+        description: Salesforce account records representing customers and prospects
+      - name: user
+        description: Salesforce user records representing sales reps and owners
+      - name: opportunityhistory
+        description: Historical snapshots of opportunity field changes
+      - name: opportunitylineitem
+        description: Line items associated with opportunities (products/services)

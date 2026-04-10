@@ -1,0 +1,55 @@
+version: 2
+
+models:
+  - name: stg_salescloud__account
+    description: |
+      Staging model for Salesforce accounts representing customers and prospects.
+      Provides a 1:1 mapping with the source Salesforce Account object,
+      applying column renaming and excluding soft-deleted records.
+    columns:
+      - name: account_id
+        description: Unique identifier for the account (Salesforce ID)
+        data_type: string
+        tests:
+          - unique
+          - not_null
+
+      - name: account_name
+        description: Name of the account/company
+        data_type: string
+
+      - name: account_type
+        description: Type of account (e.g., Customer, Prospect, Partner)
+        data_type: string
+
+      - name: industry
+        description: Industry classification for the account
+        data_type: string
+
+      - name: billing_city
+        description: City from the billing address
+        data_type: string
+
+      - name: billing_state
+        description: State/province from the billing address
+        data_type: string
+
+      - name: billing_country
+        description: Country from the billing address
+        data_type: string
+
+      - name: owner_id
+        description: Foreign key to the user who owns this account
+        data_type: string
+
+      - name: is_deleted
+        description: Boolean flag indicating soft deletion (always false in this view due to filter)
+        data_type: boolean
+
+      - name: created_date
+        description: Timestamp when the account was created in Salesforce
+        data_type: timestamp
+
+      - name: last_modified_date
+        description: Timestamp of last modification to this account
+        data_type: timestamp

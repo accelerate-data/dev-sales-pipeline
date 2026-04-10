@@ -1,0 +1,51 @@
+version: 2
+
+models:
+  - name: stg_salescloud__user
+    description: |
+      Staging model for Salesforce users representing sales reps and opportunity owners.
+      Provides a 1:1 mapping with the source Salesforce User object,
+      applying column renaming. Includes both active and inactive users.
+    columns:
+      - name: user_id
+        description: Unique identifier for the user (Salesforce ID)
+        data_type: string
+        tests:
+          - unique
+          - not_null
+
+      - name: user_name
+        description: Full name of the user
+        data_type: string
+
+      - name: email
+        description: Email address of the user
+        data_type: string
+
+      - name: username
+        description: Login username for Salesforce
+        data_type: string
+
+      - name: user_role_id
+        description: Foreign key to the user's role in Salesforce role hierarchy
+        data_type: string
+
+      - name: profile_id
+        description: Foreign key to the user's profile (permissions set)
+        data_type: string
+
+      - name: job_title
+        description: Job title of the user
+        data_type: string
+
+      - name: is_active
+        description: Boolean flag indicating if the user account is active
+        data_type: boolean
+
+      - name: created_date
+        description: Timestamp when the user was created in Salesforce
+        data_type: timestamp
+
+      - name: last_modified_date
+        description: Timestamp of last modification to this user
+        data_type: timestamp

@@ -20,6 +20,22 @@ models:
       - Includes orphaned opportunities (null account_id) for investigation - flagged via is_orphaned_opportunity
       - Includes zero-value opportunities for completeness - flagged via is_zero_value
       - LEFT JOINs preserve all opportunities even if dimension records are missing
+
+    tests:
+      - expression_is_true:
+          expression: "close_date is not null"
+          where: "is_closed = true"
+          name: fct_pipeline_closed_opportunities_have_close_date
+          config:
+            severity: error
+
+      - expression_is_true:
+          expression: "amount >= 0"
+          where: "amount is not null"
+          name: fct_pipeline_amount_non_negative
+          config:
+            severity: warn
+
     columns:
       - name: opportunity_id
         description: Primary key - unique identifier for the opportunity (grain column)
@@ -31,10 +47,29 @@ models:
       - name: account_id
         description: Foreign key to dim_account (may be null for orphaned opportunities)
         data_type: string
+        tests:
+          - relationships:
+              to: ref('dim_account')
+              field: account_id
+              config:
+                severity: warn
+                where: "account_id is not null"
+          - null_rate_below_threshold:
+              threshold: 0.02
+              name: fct_pipeline_orphaned_opportunities_below_2_percent
+              config:
+                severity: warn
 
       - name: owner_id
         description: Foreign key to dim_user representing the sales rep who owns this opportunity
         data_type: string
+        tests:
+          - relationships:
+              to: ref('dim_user')
+              field: user_id
+              config:
+                severity: warn
+                where: "owner_id is not null"
 
       - name: opportunity_name
         description: Title or name of the sales opportunity
@@ -75,6 +110,8 @@ models:
       - name: created_date
         description: When the opportunity was first created in Salesforce
         data_type: timestamp
+        tests:
+          - not_null
 
       - name: close_date
         description: Expected or actual close date (required for closed opportunities)
@@ -87,10 +124,18 @@ models:
       - name: is_closed
         description: Boolean flag - true if opportunity is closed (won or lost)
         data_type: boolean
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
 
       - name: is_won
         description: Boolean flag - true if opportunity was won (only meaningful if is_closed = true)
         data_type: boolean
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
 
       - name: forecast_category
         description: |
@@ -99,6 +144,10 @@ models:
           'Commit' (prob ≥ 50), 'Pipeline' (prob ≥ 25), 'Upside' (prob < 25).
           Used for pipeline forecasting and segmentation.
         data_type: string
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Closed Won', 'Closed Lost', 'Best Case', 'Commit', 'Pipeline', 'Upside']
 
       - name: sales_cycle_days
         description: |

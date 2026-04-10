@@ -29,6 +29,8 @@ models:
       - name: stage_name
         description: Current sales stage of the opportunity (e.g., Prospecting, Closed Won)
         data_type: string
+        tests:
+          - not_null
 
       - name: opportunity_type
         description: Type of opportunity (e.g., New Business, Upsell, Renewal)
@@ -53,6 +55,8 @@ models:
       - name: created_date
         description: Timestamp when the opportunity was created in Salesforce
         data_type: timestamp
+        tests:
+          - not_null
 
       - name: close_date
         description: Expected or actual close date of the opportunity
@@ -65,14 +69,28 @@ models:
       - name: is_closed
         description: Boolean flag indicating if the opportunity is closed (won or lost)
         data_type: boolean
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
 
       - name: is_won
         description: Boolean flag indicating if the opportunity was won (only meaningful if is_closed = true)
         data_type: boolean
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
 
       - name: is_deleted
         description: Boolean flag indicating soft deletion (always false in this view due to filter)
         data_type: boolean
+        tests:
+          - not_null
+          - accepted_values:
+              values: [false]
+              config:
+                severity: warn
 
       - name: last_modified_date
         description: Timestamp of last modification to this opportunity

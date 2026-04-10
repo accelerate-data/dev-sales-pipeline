@@ -17,6 +17,11 @@ models:
       - name: account_name
         description: Name of the customer or prospect company
         data_type: string
+        tests:
+          - not_null
+          - no_placeholder_values:
+              config:
+                severity: warn
 
       - name: account_type
         description: Classification of the account (e.g., Customer, Prospect, Partner)
@@ -45,6 +50,8 @@ models:
       - name: created_date
         description: When the account record was first created in Salesforce
         data_type: timestamp
+        tests:
+          - not_null
 
       - name: last_modified_date
         description: When the account record was last updated

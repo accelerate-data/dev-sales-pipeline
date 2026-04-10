@@ -17,10 +17,14 @@ models:
       - name: user_name
         description: Full name of the sales rep or user
         data_type: string
+        tests:
+          - not_null
 
       - name: email
         description: Email address for contact and identification
         data_type: string
+        tests:
+          - not_null
 
       - name: username
         description: Salesforce login username
@@ -41,10 +45,16 @@ models:
       - name: is_active
         description: Whether the user account is currently active (inactive users retain historical ownership)
         data_type: boolean
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
 
       - name: created_date
         description: When the user record was first created in Salesforce
         data_type: timestamp
+        tests:
+          - not_null
 
       - name: last_modified_date
         description: When the user record was last updated

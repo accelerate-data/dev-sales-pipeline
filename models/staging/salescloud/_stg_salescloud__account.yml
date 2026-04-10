@@ -17,6 +17,8 @@ models:
       - name: account_name
         description: Name of the account/company
         data_type: string
+        tests:
+          - not_null
 
       - name: account_type
         description: Type of account (e.g., Customer, Prospect, Partner)
@@ -45,10 +47,18 @@ models:
       - name: is_deleted
         description: Boolean flag indicating soft deletion (always false in this view due to filter)
         data_type: boolean
+        tests:
+          - not_null
+          - accepted_values:
+              values: [false]
+              config:
+                severity: warn
 
       - name: created_date
         description: Timestamp when the account was created in Salesforce
         data_type: timestamp
+        tests:
+          - not_null
 
       - name: last_modified_date
         description: Timestamp of last modification to this account

@@ -1,0 +1,101 @@
+version: 2
+
+models:
+  - name: stg_salescloud__opportunity
+    description: |
+      Staging model for Salesforce opportunities representing the sales pipeline.
+      Provides a 1:1 mapping with the source Salesforce Opportunity object,
+      applying column renaming and excluding soft-deleted records.
+    columns:
+      - name: opportunity_id
+        description: Unique identifier for the opportunity (Salesforce ID)
+        data_type: string
+        tests:
+          - unique
+          - not_null
+
+      - name: account_id
+        description: Foreign key to the account associated with this opportunity
+        data_type: string
+
+      - name: owner_id
+        description: Foreign key to the user who owns this opportunity (sales rep)
+        data_type: string
+
+      - name: opportunity_name
+        description: Name/title of the opportunity
+        data_type: string
+
+      - name: stage_name
+        description: Current sales stage of the opportunity (e.g., Prospecting, Closed Won)
+        data_type: string
+        tests:
+          - not_null
+
+      - name: opportunity_type
+        description: Type of opportunity (e.g., New Business, Upsell, Renewal)
+        data_type: string
+
+      - name: lead_source
+        description: Original source of the lead that became this opportunity
+        data_type: string
+
+      - name: amount
+        description: Total monetary value of the opportunity
+        data_type: decimal
+
+      - name: probability
+        description: Likelihood of closing (0-100%), typically tied to stage
+        data_type: integer
+
+      - name: expected_revenue
+        description: Calculated expected revenue (amount × probability)
+        data_type: decimal
+
+      - name: created_date
+        description: Timestamp when the opportunity was created in Salesforce
+        data_type: timestamp
+        tests:
+          - not_null
+
+      - name: close_date
+        description: Expected or actual close date of the opportunity
+        data_type: date
+
+      - name: last_stage_change_date
+        description: Date when the opportunity last moved to a different stage
+        data_type: date
+
+      - name: is_closed
+        description: Boolean flag indicating if the opportunity is closed (won or lost)
+        data_type: boolean
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+
+      - name: is_won
+        description: Boolean flag indicating if the opportunity was won (only meaningful if is_closed = true)
+        data_type: boolean
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+
+      - name: is_deleted
+        description: Boolean flag indicating soft deletion (always false in this view due to filter)
+        data_type: boolean
+        tests:
+          - not_null
+          - accepted_values:
+              values: [false]
+              config:
+                severity: warn
+
+      - name: last_modified_date
+        description: Timestamp of last modification to this opportunity
+        data_type: timestamp
+
+      - name: system_modified_timestamp
+        description: System-maintained modification timestamp
+        data_type: timestamp

@@ -1,0 +1,999 @@
+version: 2
+
+models:
+  - name: fct_pipeline
+    description: |
+      **Sales pipeline fact table** - the core analytical table for pipeline reporting and forecasting.
+
+      **Grain:** One row per opportunity (current state snapshot, not historical).
+
+      **Business Purpose:** Enables sales leadership to monitor pipeline health, forecast revenue,
+      track win rates, and analyze sales performance across accounts, reps, and stages.
+
+      **Key Metrics:**
+      - Pipeline value (amount)
+      - Weighted pipeline (amount × probability for forecasting)
+      - Sales cycle duration (days from created to closed)
+      - Win/loss analysis
+
+      **Data Quality Notes:**
+      - Includes orphaned opportunities (null account_id) for investigation - flagged via is_orphaned_opportunity
+      - Includes zero-value opportunities for completeness - flagged via is_zero_value
+      - LEFT JOINs preserve all opportunities even if dimension records are missing
+
+    tests:
+      - expression_is_true:
+          expression: "close_date is not null"
+          where: "is_closed = true"
+          name: fct_pipeline_closed_opportunities_have_close_date
+          config:
+            severity: error
+
+      - expression_is_true:
+          expression: "amount >= 0"
+          where: "amount is not null"
+          name: fct_pipeline_amount_non_negative
+          config:
+            severity: warn
+
+    columns:
+      - name: opportunity_id
+        description: Primary key - unique identifier for the opportunity (grain column)
+        data_type: string
+        tests:
+          - unique
+          - not_null
+
+      - name: account_id
+        description: Foreign key to dim_account (may be null for orphaned opportunities)
+        data_type: string
+        tests:
+          - relationships:
+              to: ref('dim_account')
+              field: account_id
+              config:
+                severity: warn
+                where: "account_id is not null"
+          - null_rate_below_threshold:
+              threshold: 0.02
+              name: fct_pipeline_orphaned_opportunities_below_2_percent
+              config:
+                severity: warn
+
+      - name: owner_id
+        description: Foreign key to dim_user representing the sales rep who owns this opportunity
+        data_type: string
+        tests:
+          - relationships:
+              to: ref('dim_user')
+              field: user_id
+              config:
+                severity: warn
+                where: "owner_id is not null"
+
+      - name: opportunity_name
+        description: Title or name of the sales opportunity
+        data_type: string
+
+      - name: stage_name
+        description: Current sales stage (e.g., Prospecting, Qualification, Closed Won)
+        data_type: string
+        tests:
+          - not_null
+
+      - name: opportunity_type
+        description: Type/category of opportunity (e.g., New Business, Upsell, Renewal)
+        data_type: string
+
+      - name: lead_source
+        description: Original source that generated this opportunity
+        data_type: string
+
+      - name: amount
+        description: Total monetary value of the opportunity
+        data_type: decimal
+
+      - name: probability
+        description: Likelihood of closing (0-100%), typically aligned with stage
+        data_type: integer
+
+      - name: expected_revenue
+        description: Salesforce-calculated expected revenue (amount × probability)
+        data_type: decimal
+
+      - name: weighted_amount
+        description: |
+          **Calculated metric:** amount × (probability / 100) for weighted pipeline forecasting.
+          Null if amount or probability is null. Used for forecast rollups.
+        data_type: decimal
+
+      - name: created_date
+        description: When the opportunity was first created in Salesforce
+        data_type: timestamp
+        tests:
+          - not_null
+
+      - name: close_date
+        description: Expected or actual close date (required for closed opportunities)
+        data_type: date
+
+      - name: last_stage_change_date
+        description: Date when the opportunity last moved to a different stage
+        data_type: date
+
+      - name: is_closed
+        description: Boolean flag - true if opportunity is closed (won or lost)
+        data_type: boolean
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+
+      - name: is_won
+        description: Boolean flag - true if opportunity was won (only meaningful if is_closed = true)
+        data_type: boolean
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+
+      - name: forecast_category
+        description: |
+          **Calculated field:** Derived from is_closed, is_won, and probability.
+          Values: 'Closed Won', 'Closed Lost', 'Best Case' (prob ≥ 75),
+          'Commit' (prob ≥ 50), 'Pipeline' (prob ≥ 25), 'Upside' (prob < 25).
+          Used for pipeline forecasting and segmentation.
+        data_type: string
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Closed Won', 'Closed Lost', 'Best Case', 'Commit', 'Pipeline', 'Upside']
+
+      - name: sales_cycle_days
+        description: |
+          **Calculated metric:** Number of days from created_date to close_date.
+          Only populated for closed opportunities. Used for sales velocity analysis.
+        data_type: integer
+
+      - name: opportunity_age_days
+        description: |
+          **Calculated metric:** Number of days from created_date to current date.
+          Indicates how long the opportunity has been in the system.
+        data_type: integer
+
+      - name: days_in_current_stage
+        description: |
+          **Calculated metric:** Number of days since last_stage_change_date.
+          Only populated for open opportunities. Helps identify stale deals.
+        data_type: integer
+
+      - name: is_orphaned_opportunity
+        description: |
+          **Data quality flag:** True if account_id is null.
+          These opportunities need investigation and are excluded from account-level rollups.
+        data_type: boolean
+
+      - name: is_zero_value
+        description: |
+          **Data quality flag:** True if amount is 0 or null.
+          Included for completeness but excluded from weighted pipeline calculations.
+        data_type: boolean
+
+      - name: last_modified_date
+        description: When the opportunity record was last updated
+        data_type: timestamp
+
+      - name: system_modified_timestamp
+        description: System-maintained modification timestamp for change tracking
+        data_type: timestamp
+
+      # Denormalized dimensions (for query convenience)
+      - name: account_name
+        description: Denormalized from dim_account - customer/prospect company name
+        data_type: string
+
+      - name: account_type
+        description: Denormalized from dim_account - account classification
+        data_type: string
+
+      - name: industry
+        description: Denormalized from dim_account - industry vertical
+        data_type: string
+
+      - name: billing_city
+        description: Denormalized from dim_account - customer city
+        data_type: string
+
+      - name: billing_state
+        description: Denormalized from dim_account - customer state/province
+        data_type: string
+
+      - name: billing_country
+        description: Denormalized from dim_account - customer country
+        data_type: string
+
+      - name: owner_name
+        description: Denormalized from dim_user - full name of opportunity owner (sales rep)
+        data_type: string
+
+      - name: owner_email
+        description: Denormalized from dim_user - email of opportunity owner
+        data_type: string
+
+      - name: owner_is_active
+        description: Denormalized from dim_user - whether the owner's account is active
+        data_type: boolean
+
+unit_tests:
+  - name: test_fct_pipeline_closed_won_forecast_category
+    description: >
+      Closed won opportunity should have forecast_category = 'Closed Won'
+      regardless of probability value. This ensures the is_closed and is_won
+      flags take precedence over probability-based categorization.
+    model: fct_pipeline
+    given:
+      - input: ref('stg_salescloud__opportunity')
+        rows:
+          - opportunity_id: OPP001
+            account_id: ACC001
+            owner_id: USR001
+            opportunity_name: Test Deal
+            stage_name: Closed Won
+            opportunity_type: New Business
+            lead_source: Web
+            amount: 50000
+            probability: 85
+            expected_revenue: 42500
+            created_date: 2026-01-15 10:00:00
+            close_date: 2026-03-20
+            last_stage_change_date: 2026-03-20
+            is_closed: true
+            is_won: true
+            last_modified_date: 2026-03-20 14:30:00
+            system_modified_timestamp: 2026-03-20 14:30:00
+      - input: ref('dim_account')
+        rows:
+          - account_id: ACC001
+            account_name: Acme Corp
+            account_type: Customer
+            industry: Technology
+            billing_city: San Francisco
+            billing_state: CA
+            billing_country: USA
+            owner_id: USR001
+            created_date: 2025-12-01 09:00:00
+            last_modified_date: 2025-12-01 09:00:00
+      - input: ref('dim_user')
+        rows:
+          - user_id: USR001
+            user_name: Jane Smith
+            email: jane.smith@example.com
+            username: jsmith
+            job_title: Account Executive
+            user_role_id: ROLE001
+            profile_id: PROF001
+            is_active: true
+            created_date: 2025-01-10 08:00:00
+            last_modified_date: 2025-01-10 08:00:00
+    expect:
+      rows:
+        - opportunity_id: OPP001
+          forecast_category: Closed Won
+          weighted_amount: 42500.0
+          sales_cycle_days: 64
+          is_orphaned_opportunity: false
+          is_zero_value: false
+
+  - name: test_fct_pipeline_best_case_threshold
+    description: >
+      Open opportunity with probability = 75 should be categorized as 'Best Case'.
+      Tests the upper threshold of the probability-based forecast categorization.
+    model: fct_pipeline
+    given:
+      - input: ref('stg_salescloud__opportunity')
+        rows:
+          - opportunity_id: OPP002
+            account_id: ACC002
+            owner_id: USR002
+            opportunity_name: Big Enterprise Deal
+            stage_name: Negotiation
+            opportunity_type: New Business
+            lead_source: Referral
+            amount: 100000
+            probability: 75
+            expected_revenue: 75000
+            created_date: 2026-02-01 10:00:00
+            close_date: 2026-05-01
+            last_stage_change_date: 2026-03-15
+            is_closed: false
+            is_won: false
+            last_modified_date: 2026-04-01 12:00:00
+            system_modified_timestamp: 2026-04-01 12:00:00
+      - input: ref('dim_account')
+        rows:
+          - account_id: ACC002
+            account_name: Big Corp
+            account_type: Prospect
+            industry: Finance
+            billing_city: New York
+            billing_state: NY
+            billing_country: USA
+            owner_id: USR002
+            created_date: 2026-01-15 09:00:00
+            last_modified_date: 2026-01-15 09:00:00
+      - input: ref('dim_user')
+        rows:
+          - user_id: USR002
+            user_name: John Doe
+            email: john.doe@example.com
+            username: jdoe
+            job_title: Senior Account Executive
+            user_role_id: ROLE002
+            profile_id: PROF002
+            is_active: true
+            created_date: 2024-06-01 08:00:00
+            last_modified_date: 2024-06-01 08:00:00
+    expect:
+      rows:
+        - opportunity_id: OPP002
+          forecast_category: Best Case
+          weighted_amount: 75000.0
+          sales_cycle_days: null
+          is_orphaned_opportunity: false
+          is_zero_value: false
+
+  - name: test_fct_pipeline_commit_threshold
+    description: >
+      Open opportunity with probability = 50 should be categorized as 'Commit'.
+      Tests the middle threshold of the forecast categorization logic.
+    model: fct_pipeline
+    given:
+      - input: ref('stg_salescloud__opportunity')
+        rows:
+          - opportunity_id: OPP003
+            account_id: ACC003
+            owner_id: USR003
+            opportunity_name: Mid-Size Deal
+            stage_name: Proposal
+            opportunity_type: Upsell
+            lead_source: Campaign
+            amount: 75000
+            probability: 50
+            expected_revenue: 37500
+            created_date: 2026-03-01 10:00:00
+            close_date: 2026-06-01
+            last_stage_change_date: 2026-03-20
+            is_closed: false
+            is_won: false
+            last_modified_date: 2026-04-05 10:00:00
+            system_modified_timestamp: 2026-04-05 10:00:00
+      - input: ref('dim_account')
+        rows:
+          - account_id: ACC003
+            account_name: Tech Startup Inc
+            account_type: Customer
+            industry: Software
+            billing_city: Austin
+            billing_state: TX
+            billing_country: USA
+            owner_id: USR003
+            created_date: 2025-08-01 09:00:00
+            last_modified_date: 2025-08-01 09:00:00
+      - input: ref('dim_user')
+        rows:
+          - user_id: USR003
+            user_name: Sarah Johnson
+            email: sarah.j@example.com
+            username: sjohnson
+            job_title: Account Executive
+            user_role_id: ROLE003
+            profile_id: PROF003
+            is_active: true
+            created_date: 2023-02-15 08:00:00
+            last_modified_date: 2023-02-15 08:00:00
+    expect:
+      rows:
+        - opportunity_id: OPP003
+          forecast_category: Commit
+          weighted_amount: 37500.0
+          sales_cycle_days: null
+          is_orphaned_opportunity: false
+          is_zero_value: false
+
+  - name: test_fct_pipeline_pipeline_threshold
+    description: >
+      Open opportunity with probability = 25 should be categorized as 'Pipeline'.
+      Tests the lower threshold of the forecast categorization logic.
+    model: fct_pipeline
+    given:
+      - input: ref('stg_salescloud__opportunity')
+        rows:
+          - opportunity_id: OPP004
+            account_id: ACC004
+            owner_id: USR004
+            opportunity_name: Early Stage Deal
+            stage_name: Qualification
+            opportunity_type: New Business
+            lead_source: Cold Call
+            amount: 30000
+            probability: 25
+            expected_revenue: 7500
+            created_date: 2026-03-15 10:00:00
+            close_date: 2026-07-01
+            last_stage_change_date: 2026-03-15
+            is_closed: false
+            is_won: false
+            last_modified_date: 2026-04-01 11:00:00
+            system_modified_timestamp: 2026-04-01 11:00:00
+      - input: ref('dim_account')
+        rows:
+          - account_id: ACC004
+            account_name: Small Business LLC
+            account_type: Prospect
+            industry: Retail
+            billing_city: Seattle
+            billing_state: WA
+            billing_country: USA
+            owner_id: USR004
+            created_date: 2026-03-01 09:00:00
+            last_modified_date: 2026-03-01 09:00:00
+      - input: ref('dim_user')
+        rows:
+          - user_id: USR004
+            user_name: Mike Chen
+            email: mchen@example.com
+            username: mchen
+            job_title: Sales Development Rep
+            user_role_id: ROLE004
+            profile_id: PROF004
+            is_active: true
+            created_date: 2025-09-01 08:00:00
+            last_modified_date: 2025-09-01 08:00:00
+    expect:
+      rows:
+        - opportunity_id: OPP004
+          forecast_category: Pipeline
+          weighted_amount: 7500.0
+          sales_cycle_days: null
+          is_orphaned_opportunity: false
+          is_zero_value: false
+
+  - name: test_fct_pipeline_upside_category
+    description: >
+      Open opportunity with probability < 25 should be categorized as 'Upside'.
+      Tests the fallback case for low-probability opportunities.
+    model: fct_pipeline
+    given:
+      - input: ref('stg_salescloud__opportunity')
+        rows:
+          - opportunity_id: OPP005
+            account_id: ACC005
+            owner_id: USR005
+            opportunity_name: Speculative Deal
+            stage_name: Prospecting
+            opportunity_type: New Business
+            lead_source: Partner
+            amount: 20000
+            probability: 10
+            expected_revenue: 2000
+            created_date: 2026-04-01 10:00:00
+            close_date: 2026-09-01
+            last_stage_change_date: 2026-04-01
+            is_closed: false
+            is_won: false
+            last_modified_date: 2026-04-05 09:00:00
+            system_modified_timestamp: 2026-04-05 09:00:00
+      - input: ref('dim_account')
+        rows:
+          - account_id: ACC005
+            account_name: Potential Customer
+            account_type: Prospect
+            industry: Healthcare
+            billing_city: Boston
+            billing_state: MA
+            billing_country: USA
+            owner_id: USR005
+            created_date: 2026-03-25 09:00:00
+            last_modified_date: 2026-03-25 09:00:00
+      - input: ref('dim_user')
+        rows:
+          - user_id: USR005
+            user_name: Emily Davis
+            email: edavis@example.com
+            username: edavis
+            job_title: Business Development Rep
+            user_role_id: ROLE005
+            profile_id: PROF005
+            is_active: true
+            created_date: 2025-11-01 08:00:00
+            last_modified_date: 2025-11-01 08:00:00
+    expect:
+      rows:
+        - opportunity_id: OPP005
+          forecast_category: Upside
+          weighted_amount: 2000.0
+          sales_cycle_days: null
+          is_orphaned_opportunity: false
+          is_zero_value: false
+
+  - name: test_fct_pipeline_zero_value_handling
+    description: >
+      Opportunity with amount = 0 should be flagged as zero-value but included
+      in the fact table. The weighted_amount should be 0 (not null) since both
+      amount and probability are present.
+    model: fct_pipeline
+    given:
+      - input: ref('stg_salescloud__opportunity')
+        rows:
+          - opportunity_id: OPP006
+            account_id: ACC006
+            owner_id: USR006
+            opportunity_name: Zero Value Deal
+            stage_name: Negotiation
+            opportunity_type: Service
+            lead_source: Web
+            amount: 0
+            probability: 50
+            expected_revenue: 0
+            created_date: 2026-02-15 10:00:00
+            close_date: 2026-05-15
+            last_stage_change_date: 2026-03-01
+            is_closed: false
+            is_won: false
+            last_modified_date: 2026-04-01 14:00:00
+            system_modified_timestamp: 2026-04-01 14:00:00
+      - input: ref('dim_account')
+        rows:
+          - account_id: ACC006
+            account_name: Service Account
+            account_type: Customer
+            industry: Education
+            billing_city: Chicago
+            billing_state: IL
+            billing_country: USA
+            owner_id: USR006
+            created_date: 2025-10-01 09:00:00
+            last_modified_date: 2025-10-01 09:00:00
+      - input: ref('dim_user')
+        rows:
+          - user_id: USR006
+            user_name: Robert Wilson
+            email: rwilson@example.com
+            username: rwilson
+            job_title: Account Manager
+            user_role_id: ROLE006
+            profile_id: PROF006
+            is_active: true
+            created_date: 2024-03-01 08:00:00
+            last_modified_date: 2024-03-01 08:00:00
+    expect:
+      rows:
+        - opportunity_id: OPP006
+          forecast_category: Commit
+          weighted_amount: 0.0
+          is_orphaned_opportunity: false
+          is_zero_value: true
+
+  - name: test_fct_pipeline_null_amount_handling
+    description: >
+      Opportunity with null amount should be flagged as zero-value and have
+      null weighted_amount (since the calculation requires non-null amount).
+    model: fct_pipeline
+    given:
+      - input: ref('stg_salescloud__opportunity')
+        rows:
+          - opportunity_id: OPP007
+            account_id: ACC007
+            owner_id: USR007
+            opportunity_name: Unknown Value Deal
+            stage_name: Prospecting
+            opportunity_type: New Business
+            lead_source: Referral
+            amount: null
+            probability: 25
+            expected_revenue: null
+            created_date: 2026-03-20 10:00:00
+            close_date: 2026-08-01
+            last_stage_change_date: 2026-03-20
+            is_closed: false
+            is_won: false
+            last_modified_date: 2026-04-02 10:00:00
+            system_modified_timestamp: 2026-04-02 10:00:00
+      - input: ref('dim_account')
+        rows:
+          - account_id: ACC007
+            account_name: Unknown Value Corp
+            account_type: Prospect
+            industry: Manufacturing
+            billing_city: Detroit
+            billing_state: MI
+            billing_country: USA
+            owner_id: USR007
+            created_date: 2026-03-15 09:00:00
+            last_modified_date: 2026-03-15 09:00:00
+      - input: ref('dim_user')
+        rows:
+          - user_id: USR007
+            user_name: Lisa Anderson
+            email: landerson@example.com
+            username: landerson
+            job_title: Sales Rep
+            user_role_id: ROLE007
+            profile_id: PROF007
+            is_active: true
+            created_date: 2024-07-01 08:00:00
+            last_modified_date: 2024-07-01 08:00:00
+    expect:
+      rows:
+        - opportunity_id: OPP007
+          forecast_category: Pipeline
+          weighted_amount: null
+          is_orphaned_opportunity: false
+          is_zero_value: true
+
+  - name: test_fct_pipeline_open_opportunity_null_close_date
+    description: >
+      Open opportunity with null close_date should preserve the null value.
+      This is acceptable since the opportunity hasn't been closed yet.
+    model: fct_pipeline
+    given:
+      - input: ref('stg_salescloud__opportunity')
+        rows:
+          - opportunity_id: OPP008
+            account_id: ACC008
+            owner_id: USR008
+            opportunity_name: Future Close Deal
+            stage_name: Discovery
+            opportunity_type: New Business
+            lead_source: Event
+            amount: 45000
+            probability: 30
+            expected_revenue: 13500
+            created_date: 2026-04-01 10:00:00
+            close_date: null
+            last_stage_change_date: 2026-04-01
+            is_closed: false
+            is_won: false
+            last_modified_date: 2026-04-08 11:00:00
+            system_modified_timestamp: 2026-04-08 11:00:00
+      - input: ref('dim_account')
+        rows:
+          - account_id: ACC008
+            account_name: Future Customer Inc
+            account_type: Prospect
+            industry: Consulting
+            billing_city: Denver
+            billing_state: CO
+            billing_country: USA
+            owner_id: USR008
+            created_date: 2026-03-28 09:00:00
+            last_modified_date: 2026-03-28 09:00:00
+      - input: ref('dim_user')
+        rows:
+          - user_id: USR008
+            user_name: David Martinez
+            email: dmartinez@example.com
+            username: dmartinez
+            job_title: Account Executive
+            user_role_id: ROLE008
+            profile_id: PROF008
+            is_active: true
+            created_date: 2023-05-15 08:00:00
+            last_modified_date: 2023-05-15 08:00:00
+    expect:
+      rows:
+        - opportunity_id: OPP008
+          close_date: null
+          forecast_category: Pipeline
+          sales_cycle_days: null
+          is_orphaned_opportunity: false
+          is_zero_value: false
+
+  - name: test_fct_pipeline_weighted_amount_calculation
+    description: >
+      Verifies the weighted_amount calculation: amount × (probability / 100).
+      Tests multiple scenarios with different probability values.
+    model: fct_pipeline
+    given:
+      - input: ref('stg_salescloud__opportunity')
+        rows:
+          - opportunity_id: OPP009
+            account_id: ACC009
+            owner_id: USR009
+            opportunity_name: Weighted Test 1
+            stage_name: Proposal
+            opportunity_type: New Business
+            lead_source: Web
+            amount: 100000
+            probability: 75
+            expected_revenue: 75000
+            created_date: 2026-02-01 10:00:00
+            close_date: 2026-05-01
+            last_stage_change_date: 2026-03-01
+            is_closed: false
+            is_won: false
+            last_modified_date: 2026-04-01 10:00:00
+            system_modified_timestamp: 2026-04-01 10:00:00
+          - opportunity_id: OPP010
+            account_id: ACC009
+            owner_id: USR009
+            opportunity_name: Weighted Test 2
+            stage_name: Negotiation
+            opportunity_type: Upsell
+            lead_source: Referral
+            amount: 50000
+            probability: 90
+            expected_revenue: 45000
+            created_date: 2026-03-01 10:00:00
+            close_date: 2026-06-01
+            last_stage_change_date: 2026-03-15
+            is_closed: false
+            is_won: false
+            last_modified_date: 2026-04-05 10:00:00
+            system_modified_timestamp: 2026-04-05 10:00:00
+      - input: ref('dim_account')
+        rows:
+          - account_id: ACC009
+            account_name: Multi-Opp Customer
+            account_type: Customer
+            industry: Technology
+            billing_city: San Jose
+            billing_state: CA
+            billing_country: USA
+            owner_id: USR009
+            created_date: 2025-06-01 09:00:00
+            last_modified_date: 2025-06-01 09:00:00
+      - input: ref('dim_user')
+        rows:
+          - user_id: USR009
+            user_name: Jennifer Lee
+            email: jlee@example.com
+            username: jlee
+            job_title: Senior Account Executive
+            user_role_id: ROLE009
+            profile_id: PROF009
+            is_active: true
+            created_date: 2022-01-10 08:00:00
+            last_modified_date: 2022-01-10 08:00:00
+    expect:
+      rows:
+        - opportunity_id: OPP009
+          weighted_amount: 75000.0
+        - opportunity_id: OPP010
+          weighted_amount: 45000.0
+
+  - name: test_fct_pipeline_sales_cycle_calculation
+    description: >
+      Tests sales_cycle_days calculation for closed opportunities.
+      Verifies DATEDIFF(day, created_date, close_date) logic.
+    model: fct_pipeline
+    given:
+      - input: ref('stg_salescloud__opportunity')
+        rows:
+          - opportunity_id: OPP011
+            account_id: ACC010
+            owner_id: USR010
+            opportunity_name: Quick Close
+            stage_name: Closed Won
+            opportunity_type: New Business
+            lead_source: Referral
+            amount: 25000
+            probability: 100
+            expected_revenue: 25000
+            created_date: 2026-03-01 10:00:00
+            close_date: 2026-03-31
+            last_stage_change_date: 2026-03-31
+            is_closed: true
+            is_won: true
+            last_modified_date: 2026-03-31 16:00:00
+            system_modified_timestamp: 2026-03-31 16:00:00
+          - opportunity_id: OPP012
+            account_id: ACC010
+            owner_id: USR010
+            opportunity_name: Long Sales Cycle
+            stage_name: Closed Won
+            opportunity_type: Enterprise
+            lead_source: Campaign
+            amount: 500000
+            probability: 100
+            expected_revenue: 500000
+            created_date: 2025-01-01 10:00:00
+            close_date: 2026-01-01
+            last_stage_change_date: 2026-01-01
+            is_closed: true
+            is_won: true
+            last_modified_date: 2026-01-01 14:00:00
+            system_modified_timestamp: 2026-01-01 14:00:00
+      - input: ref('dim_account')
+        rows:
+          - account_id: ACC010
+            account_name: Enterprise Customer
+            account_type: Customer
+            industry: Finance
+            billing_city: New York
+            billing_state: NY
+            billing_country: USA
+            owner_id: USR010
+            created_date: 2024-12-01 09:00:00
+            last_modified_date: 2024-12-01 09:00:00
+      - input: ref('dim_user')
+        rows:
+          - user_id: USR010
+            user_name: Thomas Brown
+            email: tbrown@example.com
+            username: tbrown
+            job_title: Enterprise Account Executive
+            user_role_id: ROLE010
+            profile_id: PROF010
+            is_active: true
+            created_date: 2021-03-01 08:00:00
+            last_modified_date: 2021-03-01 08:00:00
+    expect:
+      rows:
+        - opportunity_id: OPP011
+          sales_cycle_days: 30
+          forecast_category: Closed Won
+        - opportunity_id: OPP012
+          sales_cycle_days: 366
+          forecast_category: Closed Won
+
+  - name: test_fct_pipeline_orphaned_opportunity
+    description: >
+      Opportunity with null account_id should be flagged as orphaned.
+      LEFT JOIN to dim_account should result in null account attributes.
+    model: fct_pipeline
+    given:
+      - input: ref('stg_salescloud__opportunity')
+        rows:
+          - opportunity_id: OPP013
+            account_id: null
+            owner_id: USR011
+            opportunity_name: Orphaned Deal
+            stage_name: Qualification
+            opportunity_type: New Business
+            lead_source: Unknown
+            amount: 15000
+            probability: 20
+            expected_revenue: 3000
+            created_date: 2026-03-10 10:00:00
+            close_date: 2026-07-01
+            last_stage_change_date: 2026-03-10
+            is_closed: false
+            is_won: false
+            last_modified_date: 2026-04-01 12:00:00
+            system_modified_timestamp: 2026-04-01 12:00:00
+      - input: ref('dim_account')
+        rows: []
+      - input: ref('dim_user')
+        rows:
+          - user_id: USR011
+            user_name: Carlos Rodriguez
+            email: crodriguez@example.com
+            username: crodriguez
+            job_title: Sales Rep
+            user_role_id: ROLE011
+            profile_id: PROF011
+            is_active: true
+            created_date: 2025-04-01 08:00:00
+            last_modified_date: 2025-04-01 08:00:00
+    expect:
+      rows:
+        - opportunity_id: OPP013
+          account_id: null
+          is_orphaned_opportunity: true
+          account_name: null
+          account_type: null
+          industry: null
+
+  - name: test_fct_pipeline_closed_lost_category
+    description: >
+      Closed lost opportunity should have forecast_category = 'Closed Lost'
+      regardless of probability value.
+    model: fct_pipeline
+    given:
+      - input: ref('stg_salescloud__opportunity')
+        rows:
+          - opportunity_id: OPP014
+            account_id: ACC011
+            owner_id: USR012
+            opportunity_name: Lost Deal
+            stage_name: Closed Lost
+            opportunity_type: New Business
+            lead_source: Cold Call
+            amount: 80000
+            probability: 0
+            expected_revenue: 0
+            created_date: 2026-01-05 10:00:00
+            close_date: 2026-03-15
+            last_stage_change_date: 2026-03-15
+            is_closed: true
+            is_won: false
+            last_modified_date: 2026-03-15 17:00:00
+            system_modified_timestamp: 2026-03-15 17:00:00
+      - input: ref('dim_account')
+        rows:
+          - account_id: ACC011
+            account_name: Lost Prospect
+            account_type: Prospect
+            industry: Healthcare
+            billing_city: Miami
+            billing_state: FL
+            billing_country: USA
+            owner_id: USR012
+            created_date: 2026-01-01 09:00:00
+            last_modified_date: 2026-01-01 09:00:00
+      - input: ref('dim_user')
+        rows:
+          - user_id: USR012
+            user_name: Amanda White
+            email: awhite@example.com
+            username: awhite
+            job_title: Account Executive
+            user_role_id: ROLE012
+            profile_id: PROF012
+            is_active: true
+            created_date: 2024-02-01 08:00:00
+            last_modified_date: 2024-02-01 08:00:00
+    expect:
+      rows:
+        - opportunity_id: OPP014
+          forecast_category: Closed Lost
+          sales_cycle_days: 69
+          is_orphaned_opportunity: false
+          is_zero_value: false
+
+  - name: test_fct_pipeline_special_characters_in_account_name
+    description: >
+      Account with special characters in name should be handled properly.
+      Tests string handling and encoding (no truncation or corruption).
+    model: fct_pipeline
+    given:
+      - input: ref('stg_salescloud__opportunity')
+        rows:
+          - opportunity_id: OPP015
+            account_id: ACC012
+            owner_id: USR013
+            opportunity_name: Special Char Deal
+            stage_name: Proposal
+            opportunity_type: New Business
+            lead_source: Partner
+            amount: 35000
+            probability: 60
+            expected_revenue: 21000
+            created_date: 2026-03-05 10:00:00
+            close_date: 2026-06-15
+            last_stage_change_date: 2026-03-20
+            is_closed: false
+            is_won: false
+            last_modified_date: 2026-04-08 13:00:00
+            system_modified_timestamp: 2026-04-08 13:00:00
+      - input: ref('dim_account')
+        rows:
+          - account_id: ACC012
+            account_name: "O'Reilly & Sons, Inc. (formerly: M&A Corp.)"
+            account_type: Customer
+            industry: Publishing
+            billing_city: Portland
+            billing_state: OR
+            billing_country: USA
+            owner_id: USR013
+            created_date: 2025-11-15 09:00:00
+            last_modified_date: 2025-11-15 09:00:00
+      - input: ref('dim_user')
+        rows:
+          - user_id: USR013
+            user_name: Patricia Green
+            email: pgreen@example.com
+            username: pgreen
+            job_title: Account Manager
+            user_role_id: ROLE013
+            profile_id: PROF013
+            is_active: true
+            created_date: 2023-08-01 08:00:00
+            last_modified_date: 2023-08-01 08:00:00
+    expect:
+      rows:
+        - opportunity_id: OPP015
+          account_name: "O'Reilly & Sons, Inc. (formerly: M&A Corp.)"
+          forecast_category: Commit
+          is_orphaned_opportunity: false

@@ -1,0 +1,19 @@
+# dbt build artifacts
+target/
+dbt_packages/
+logs/
+
+# Python
+*.pyc
+__pycache__/
+.venv/
+venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# VD Studio
+.claude/
+intent-state.json

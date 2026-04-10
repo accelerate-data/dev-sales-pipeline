@@ -1,0 +1,61 @@
+version: 2
+
+models:
+  - name: dim_user
+    description: |
+      User dimension table representing sales reps and opportunity owners.
+      One row per user (SCD Type 1 - current state only).
+      Enables slicing pipeline metrics by sales rep, team, and role.
+    columns:
+      - name: user_id
+        description: Primary key - unique identifier for the user
+        data_type: string
+        tests:
+          - unique
+          - not_null
+
+      - name: user_name
+        description: Full name of the sales rep or user
+        data_type: string
+        tests:
+          - not_null
+
+      - name: email
+        description: Email address for contact and identification
+        data_type: string
+        tests:
+          - not_null
+
+      - name: username
+        description: Salesforce login username
+        data_type: string
+
+      - name: job_title
+        description: Role or title of the user (e.g., Account Executive, Sales Manager)
+        data_type: string
+
+      - name: user_role_id
+        description: Foreign key to the user's position in the Salesforce role hierarchy
+        data_type: string
+
+      - name: profile_id
+        description: Foreign key to the user's permission profile
+        data_type: string
+
+      - name: is_active
+        description: Whether the user account is currently active (inactive users retain historical ownership)
+        data_type: boolean
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+
+      - name: created_date
+        description: When the user record was first created in Salesforce
+        data_type: timestamp
+        tests:
+          - not_null
+
+      - name: last_modified_date
+        description: When the user record was last updated
+        data_type: timestamp

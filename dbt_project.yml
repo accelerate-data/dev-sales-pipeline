@@ -15,6 +15,11 @@ clean-targets:
   - "target"
   - "dbt_packages"
 
+# Override Elementary package hooks to prevent Delta Lake DELTA_UNSUPPORTED_SUBQUERY
+# errors caused by elementary.on_run_start() running UPDATE with subqueries.
+on-run-start: []
+on-run-end: []
+
 models:
   sales_pipeline:
     staging:

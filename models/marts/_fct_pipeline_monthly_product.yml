@@ -1,0 +1,104 @@
+version: 2
+
+models:
+  - name: fct_pipeline_monthly_product
+    description: |
+      Monthly product-level aggregates showing product performance metrics aggregated by close month.
+      Grain: One row per calendar month + product combination.
+
+      This fact table enables:
+      - Product trend analysis over time
+      - Monthly revenue forecasting by product
+      - Product mix optimization
+      - Win rate tracking at the product level
+
+      Metrics are calculated from opportunity line items joined to opportunities for close date information.
+      Only includes opportunities with non-null close dates. Includes both won and lost opportunities
+      to provide complete visibility into product performance.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - close_month
+            - product_id
+    columns:
+      - name: close_month
+        description: First day of the calendar month when opportunities closed (YYYY-MM-DD format)
+        data_type: date
+        tests:
+          - not_null
+
+      - name: product_id
+        description: Unique identifier for the product (Product2Id from Salesforce)
+        data_type: string
+        tests:
+          - not_null
+
+      - name: product_code
+        description: Product code or SKU for the product
+        data_type: string
+
+      - name: product_name
+        description: Name of the product or service
+        data_type: string
+
+      - name: total_revenue
+        description: Sum of total_price from all line items for this product in this month (includes won and lost opportunities)
+        data_type: double
+        tests:
+          - not_null
+
+      - name: won_revenue
+        description: Sum of total_price from line items in won opportunities only for this product-month
+        data_type: double
+
+      - name: lost_revenue
+        description: Sum of total_price from line items in lost opportunities only (total_revenue - won_revenue)
+        data_type: double
+
+      - name: opportunity_count
+        description: Count of distinct opportunities that included this product and closed in this month
+        data_type: bigint
+        tests:
+          - not_null
+
+      - name: won_opportunity_count
+        description: Count of distinct won opportunities that included this product in this month
+        data_type: bigint
+
+      - name: lost_opportunity_count
+        description: Count of distinct lost opportunities (opportunity_count - won_opportunity_count)
+        data_type: bigint
+
+      - name: total_quantity
+        description: Sum of quantity across all line items for this product in this month
+        data_type: double
+
+      - name: line_item_count
+        description: Total number of line item records aggregated into this row (for validation)
+        data_type: bigint
+        tests:
+          - not_null
+
+      - name: avg_deal_size
+        description: Average revenue per opportunity for this product-month (total_revenue / opportunity_count)
+        data_type: double
+
+      - name: avg_unit_price
+        description: Average unit price across all line items for this product in this month
+        data_type: double
+
+      - name: avg_discount
+        description: Average discount amount or percentage across line items for this product-month
+        data_type: double
+
+      - name: win_rate_pct
+        description: Percentage of opportunities won for this product-month (won_opportunity_count / opportunity_count × 100)
+        data_type: double
+
+      - name: earliest_close_date
+        description: Earliest close date within this month for this product (should align with close_month)
+        data_type: date
+
+      - name: latest_close_date
+        description: Latest close date within this month for this product (should be within the same calendar month)
+        data_type: date

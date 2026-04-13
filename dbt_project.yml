@@ -15,6 +15,13 @@ clean-targets:
   - "target"
   - "dbt_packages"
 
+dispatch:
+  - macro_namespace: elementary
+    search_order:
+      - sales_pipeline
+      - elementary_fabricspark
+      - elementary
+
 models:
   sales_pipeline:
     staging:
@@ -23,3 +30,6 @@ models:
       +materialized: ephemeral
     marts:
       +materialized: table
+  elementary:
+    +schema: elementary
+    +tags: ["elementary"]

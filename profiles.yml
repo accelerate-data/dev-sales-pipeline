@@ -69,4 +69,4 @@ dbt_fab_spark:
       connect_timeout: 500
       threads: 10
 
-  target: ephemeral_dev
+  target: prod

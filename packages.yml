@@ -1,7 +1,8 @@
 packages:
-  - package: elementary-data/elementary
-    version: [">=0.13.0", "<0.14.0"]
   - package: dbt-labs/dbt_utils
     version: [">=1.1.0", "<2.0.0"]
   - package: calogica/dbt_expectations
     version: [">=0.10.0", "<0.11.0"]
+# elementary-data/elementary removed: its on_run_start hook uses Delta Lake
+# UPDATE with subqueries which Fabric Spark does not support.
+# Run elementary separately with: dbt run -s elementary --target prod

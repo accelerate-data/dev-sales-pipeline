@@ -1,0 +1,269 @@
+# Ephemeral Fabric CI Workflow
+#
+# Triggered on every PR against main. Provisions an isolated Fabric workspace,
+# runs static analysis, injects the dbt notebook, and posts a developer checklist.
+# Tears down the workspace when the PR is closed or merged.
+#
+# Domain configuration is read from ci-config.yml in the repo root.
+# Org-level GitHub secrets are inherited automatically.
+#
+# TODO: Extract to accelerate-data/vibedata-workflows as a reusable workflow
+#       once the central repo is created.
+
+name: Ephemeral Fabric CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches: [main]
+
+env:
+  FABRIC_API: https://api.fabric.microsoft.com/v1
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  # ─── PREFLIGHT ────────────────────────────────────────────────────────────
+  # Validates the branch is rebased onto main and parses domain config.
+  preflight:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    outputs:
+      domain: ${{ steps.config.outputs.domain }}
+      prod_workspace_id: ${{ steps.config.outputs.prod_workspace_id }}
+      prod_workspace_name: ${{ steps.config.outputs.prod_workspace_name }}
+      prod_lakehouse_id: ${{ steps.config.outputs.prod_lakehouse_id }}
+      prod_lakehouse_name: ${{ steps.config.outputs.prod_lakehouse_name }}
+      prod_schema: ${{ steps.config.outputs.prod_schema }}
+      notebook_glob: ${{ steps.config.outputs.notebook_glob }}
+      ephemeral_name: ${{ steps.names.outputs.ephemeral_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rebase check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BEHIND=$(gh api \
+            repos/${{ github.repository }}/compare/main...${{ github.event.pull_request.head.sha }} \
+            --jq '.behind_by')
+          if [ "$BEHIND" -gt 0 ]; then
+            echo "::error::Branch is $BEHIND commits behind main. Please rebase before CI can proceed."
+            exit 1
+          fi
+          echo "Branch is up to date with main."
+
+      - name: Parse ci-config.yml
+        id: config
+        run: |
+          python3 - <<'EOF'
+          import yaml, os, sys
+
+          config_path = "ci-config.yml"
+          if not os.path.exists(config_path):
+              print(f"::error::ci-config.yml not found in repo root. See docs/superpowers/specs/ for the schema.", file=sys.stderr)
+              sys.exit(1)
+
+          with open(config_path) as f:
+              c = yaml.safe_load(f)
+
+          required = ["domain", "prod_workspace_id", "prod_workspace_name",
+                      "prod_lakehouse_id", "prod_lakehouse_name", "prod_schema", "notebook_glob"]
+          missing = [k for k in required if k not in c]
+          if missing:
+              print(f"::error::ci-config.yml is missing required keys: {missing}", file=sys.stderr)
+              sys.exit(1)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              for k, v in c.items():
+                  out.write(f"{k}={v}\n")
+
+          print(f"Config loaded: domain={c['domain']}")
+          EOF
+
+      - name: Compute ephemeral workspace name
+        id: names
+        run: |
+          REPO="${{ github.event.repository.name }}"
+          PR="${{ github.event.pull_request.number }}"
+          NAME="ephemeral-${REPO}-${PR}"
+          echo "ephemeral_name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "Ephemeral workspace name: ${NAME}"
+
+  # ─── PROVISION ────────────────────────────────────────────────────────────
+  # Idempotent: finds or creates the ephemeral workspace and lakehouse.
+  provision:
+    needs: preflight
+    runs-on: ubuntu-latest
+    outputs:
+      ephemeral_workspace_id: ${{ steps.provision.outputs.workspace_id }}
+      ephemeral_lakehouse_id: ${{ steps.provision.outputs.lakehouse_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: pip install requests pyyaml --quiet
+
+      - name: Provision ephemeral workspace and lakehouse
+        id: provision
+        env:
+          FABRIC_TENANT_ID: ${{ secrets.FABRIC_TENANT_ID }}
+          FABRIC_CLIENT_ID: ${{ secrets.FABRIC_CLIENT_ID }}
+          FABRIC_CLIENT_SECRET: ${{ secrets.FABRIC_CLIENT_SECRET }}
+          FABRIC_CAPACITY_ID: ${{ secrets.FABRIC_CAPACITY_ID }}
+          EPHEMERAL_NAME: ${{ needs.preflight.outputs.ephemeral_name }}
+          GITHUB_OUTPUT: ${{ env.GITHUB_OUTPUT }}
+        run: |
+          python3 scripts/fabric_api.py provision \
+            --name "$EPHEMERAL_NAME" \
+            --capacity-id "$FABRIC_CAPACITY_ID"
+
+  # ─── STATIC ANALYSIS ──────────────────────────────────────────────────────
+  # Runs SQL lint, secret scan, dbt scorecard, then injects the notebook.
+  static-analysis:
+    needs: [preflight, provision]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install analysis tools
+        run: |
+          pip install ruff sqlfluff pyyaml requests --quiet
+          # gitleaks via binary (faster than pip)
+          curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz \
+            | tar xz -C /usr/local/bin gitleaks
+
+      - name: Install dbt for scorecard parsing
+        run: pip install dbt-core --quiet
+
+      - name: Create reports directory
+        run: mkdir -p reports
+
+      - name: ruff — Python/Jinja lint
+        run: |
+          ruff check . --output-format json > reports/ruff.json 2>/dev/null || true
+          echo "ruff complete: $(python3 -c "import json; d=json.load(open('reports/ruff.json')); print(f'{len(d)} issues')" 2>/dev/null || echo 'check reports/ruff.json')"
+
+      - name: sqlfluff — SQL convention lint
+        run: |
+          sqlfluff lint models/ --dialect sparksql --format json > reports/sqlfluff.json 2>/dev/null || true
+          echo "sqlfluff complete"
+
+      - name: gitleaks — secret scan
+        run: |
+          gitleaks detect --source . \
+            --report-format json \
+            --report-path reports/gitleaks.json \
+            --no-banner \
+            --exit-code 0 2>/dev/null || true
+          echo "gitleaks complete"
+
+      - name: dbt scorecard — doc and test coverage
+        env:
+          # Dummy env vars so dbt parse can resolve profiles.yml without a live DB
+          WORKSPACE_ID: dummy
+          WORKSPACE_NAME: dummy
+          LAKEHOUSE: dummy
+          LAKEHOUSE_ID: dummy
+          SCHEMA: dummy
+          DBT_JOB_NAME: ci-parse
+        run: |
+          dbt parse --profiles-dir . --quiet 2>/dev/null || true
+          python3 scripts/scorecard.py \
+            --manifest target/manifest.json \
+            --agents-md AGENTS.md \
+            > reports/scorecard.json
+          echo "scorecard complete"
+
+      - name: Inject notebook into ephemeral workspace
+        env:
+          FABRIC_TENANT_ID: ${{ secrets.FABRIC_TENANT_ID }}
+          FABRIC_CLIENT_ID: ${{ secrets.FABRIC_CLIENT_ID }}
+          FABRIC_CLIENT_SECRET: ${{ secrets.FABRIC_CLIENT_SECRET }}
+          EPHEMERAL_WORKSPACE_ID: ${{ needs.provision.outputs.ephemeral_workspace_id }}
+          EPHEMERAL_WORKSPACE_NAME: ${{ needs.preflight.outputs.ephemeral_name }}
+          EPHEMERAL_LAKEHOUSE_ID: ${{ needs.provision.outputs.ephemeral_lakehouse_id }}
+          NOTEBOOK_GLOB: ${{ needs.preflight.outputs.notebook_glob }}
+          HEAD_BRANCH: ${{ github.head_ref }}
+          REPO_URL: ${{ github.event.repository.clone_url }}
+          GITHUB_APP_ID: ${{ secrets.GITHUB_APP_ID }}
+          GITHUB_INSTALLATION_ID: ${{ secrets.GITHUB_INSTALLATION_ID }}
+          GITHUB_APP_PEM: ${{ secrets.GITHUB_APP_PEM }}
+          AZURE_KEYVAULT_URL: ${{ secrets.AZURE_KEYVAULT_URL }}
+        run: |
+          python3 scripts/inject_notebook.py
+          echo "notebook injection complete"
+
+      - name: Upload CI reports as artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ci-reports-pr${{ github.event.pull_request.number }}
+          path: reports/
+          retention-days: 30
+
+  # ─── NOTIFY ───────────────────────────────────────────────────────────────
+  # Posts a single PR comment with workspace URL, scorecard, and dev checklist.
+  notify:
+    needs: [preflight, provision, static-analysis]
+    runs-on: ubuntu-latest
+    if: always() && github.event.action != 'closed'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: pip install requests pyyaml --quiet
+
+      - name: Download CI reports
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-reports-pr${{ github.event.pull_request.number }}
+          path: reports/
+        continue-on-error: true
+
+      - name: Post PR comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EPHEMERAL_WORKSPACE_ID: ${{ needs.provision.outputs.ephemeral_workspace_id }}
+          EPHEMERAL_WORKSPACE_NAME: ${{ needs.preflight.outputs.ephemeral_name }}
+          STATIC_ANALYSIS_OUTCOME: ${{ needs.static-analysis.result }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          HEAD_BRANCH: ${{ github.head_ref }}
+        run: |
+          python3 scripts/notify.py
+
+  # ─── TEARDOWN ─────────────────────────────────────────────────────────────
+  # Deletes the ephemeral workspace when the PR is closed (merged or cancelled).
+  teardown:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: pip install requests --quiet
+
+      - name: Delete ephemeral workspace
+        env:
+          FABRIC_TENANT_ID: ${{ secrets.FABRIC_TENANT_ID }}
+          FABRIC_CLIENT_ID: ${{ secrets.FABRIC_CLIENT_ID }}
+          FABRIC_CLIENT_SECRET: ${{ secrets.FABRIC_CLIENT_SECRET }}
+          EPHEMERAL_NAME: ephemeral-${{ github.event.repository.name }}-${{ github.event.pull_request.number }}
+        run: |
+          python3 scripts/fabric_api.py teardown --name "$EPHEMERAL_NAME"

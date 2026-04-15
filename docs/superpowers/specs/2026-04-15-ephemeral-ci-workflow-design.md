@@ -32,7 +32,7 @@ Two repositories involved:
 ```
 .github/workflows/
   ci.yml                   ← thin caller (~20 lines), calls vibedata-workflows
-ephe-workspace-ci-config.yml  ← domain-specific config (workspace IDs, lakehouse, etc.)
+ci-config.yml                 ← domain-specific config (workspace IDs, lakehouse, etc.)
 intents/**/notebook.ipynb  ← generated in design phase, injected by CI at runtime
 ```
 
@@ -53,7 +53,7 @@ jobs:
 
 ## 3. Domain Config File
 
-`ephe-workspace-ci-config.yml` lives in the root of each domain repo. It holds domain-specific values that are not secrets.
+`ci-config.yml` lives in the root of each domain repo. It holds domain-specific values that are not secrets.
 
 ```yaml
 domain: sales
@@ -104,7 +104,7 @@ pull_request types: [closed]                         → teardown
    ```
    Fail message: `"Branch is N commits behind main. Please rebase before CI can proceed."`
 
-2. **Parse `ephe-workspace-ci-config.yml`** — exports all domain config values as job outputs for downstream jobs.
+2. **Parse `ci-config.yml`** — exports all domain config values as job outputs for downstream jobs.
 
 ### 5.3 Job: `provision`
 

@@ -1,5 +1,6 @@
 {{ config(materialized='table') }}
 
+-- test: vd-1546 auto-rebase manual validation
 with opportunities as (
     select * from {{ ref('stg_salescloud__opportunity') }}
 ),

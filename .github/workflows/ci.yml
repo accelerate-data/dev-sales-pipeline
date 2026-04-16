@@ -27,7 +27,7 @@ env:
 jobs:
   # ─── PREFLIGHT ────────────────────────────────────────────────────────────
   # Auto-rebases branch onto main if behind, then parses ci-config.yml.
-  # No Azure access needed — uses built-in GITHUB_TOKEN only.
+  # Uses KV UAMI to fetch App credentials for the force-push token; no Fabric UAMI needed.
   preflight:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
@@ -46,9 +46,31 @@ jobs:
           ref: ${{ github.head_ref }}
           fetch-depth: 0
 
+      - name: Login — KV UAMI (App credentials for auto-rebase)
+        uses: azure/login@v2
+        with:
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          client-id: ${{ vars.AZURE_KV_CLIENT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Fetch App credentials from Key Vault
+        env:
+          AZURE_KEYVAULT_URL: ${{ vars.AZURE_KEYVAULT_URL }}
+          GH_APP_ID_KV_NAME: ${{ vars.GH_APP_ID_KV_NAME }}
+          GH_APP_PEM_KV_NAME: ${{ vars.GH_APP_PEM_KV_NAME }}
+        run: python3 ${{ env.SCRIPTS }}/kv_utils.py fetch-app-token-creds
+
+      - name: Generate App token for auto-rebase push
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ env.GH_APP_ID_VALUE }}
+          private-key: ${{ env.GH_APP_PEM_VALUE }}
+
       - name: Auto-rebase onto main (or fail with conflict list)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -66,7 +88,8 @@ jobs:
           git fetch origin main
 
           if git rebase origin/main; then
-            echo "Auto-rebase succeeded. Force-pushing rebased branch..."
+            echo "Auto-rebase succeeded. Force-pushing rebased branch via App token..."
+            git remote set-url origin "https://x-access-token:${APP_TOKEN}@github.com/${{ github.repository }}.git"
             git push --force-with-lease origin "HEAD:${{ github.head_ref }}"
             echo "Auto-rebase complete. CI continues with rebased code."
           else

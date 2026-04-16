@@ -1,0 +1,327 @@
+# Ephemeral Fabric CI Workflow
+#
+# Self-contained — all scripts live in .github/scripts/ within this repo.
+# Domain configuration: ci-config.yml in the repo root.
+#
+# Authentication: GitHub OIDC — two UAMIs, no credentials stored.
+# Required GitHub Variables (set at org or repo level):
+#   AZURE_TENANT_ID, AZURE_KV_CLIENT_ID, AZURE_FABRIC_CLIENT_ID, AZURE_KEYVAULT_URL
+#   GH_APP_ID_KV_NAME, GH_INSTALLATION_ID_KV_NAME, GH_APP_PEM_KV_NAME
+
+name: Ephemeral Fabric CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches: [main]
+
+permissions:
+  contents: write   # required for auto-rebase force-push
+  pull-requests: write
+  id-token: write   # required for GitHub OIDC → Azure login
+
+env:
+  PYTHON_VERSION: "3.11"
+  SCRIPTS: .github/scripts
+
+jobs:
+  # ─── PREFLIGHT ────────────────────────────────────────────────────────────
+  # Auto-rebases branch onto main if behind, then parses ci-config.yml.
+  # No Azure access needed — uses built-in GITHUB_TOKEN only.
+  preflight:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    outputs:
+      domain: ${{ steps.config.outputs.domain }}
+      prod_workspace_id: ${{ steps.config.outputs.prod_workspace_id }}
+      prod_workspace_name: ${{ steps.config.outputs.prod_workspace_name }}
+      prod_lakehouse_id: ${{ steps.config.outputs.prod_lakehouse_id }}
+      prod_lakehouse_name: ${{ steps.config.outputs.prod_lakehouse_name }}
+      prod_schema: ${{ steps.config.outputs.prod_schema }}
+      notebook_glob: ${{ steps.config.outputs.notebook_glob }}
+      ephemeral_name: ${{ steps.names.outputs.ephemeral_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Auto-rebase onto main (or fail with conflict list)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          BEHIND=$(gh api \
+            repos/${{ github.repository }}/compare/main...${{ github.event.pull_request.head.sha }} \
+            --jq '.behind_by')
+
+          if [ "$BEHIND" -eq 0 ]; then
+            echo "Branch is up to date with main."
+            exit 0
+          fi
+
+          echo "Branch is ${BEHIND} commit(s) behind main — attempting auto-rebase..."
+          git fetch origin main
+
+          if git rebase origin/main; then
+            echo "Auto-rebase succeeded. Force-pushing rebased branch..."
+            git push --force-with-lease origin "HEAD:${{ github.head_ref }}"
+            echo "Auto-rebase complete. CI continues with rebased code."
+          else
+            CONFLICT_FILES=$(git diff --name-only --diff-filter=U | head -20)
+            git rebase --abort
+
+            COMMENT_FILE=$(mktemp --suffix=.md)
+            {
+              printf '## ⚠️ Auto-Rebase Failed — Manual Rebase Required\n\n'
+              printf 'This branch is **%s commit(s) behind `main`** and the auto-rebase produced conflicts that cannot be resolved automatically.\n\n' "$BEHIND"
+              printf '**Conflicting files:**\n'
+              echo "$CONFLICT_FILES" | while IFS= read -r f; do printf '- `%s`\n' "$f"; done
+              printf '\nPlease resolve the conflicts locally and re-push:\n\n'
+              printf '```bash\n'
+              printf 'git fetch origin\n'
+              printf 'git rebase origin/main\n'
+              printf '# resolve conflicts in the files listed above, then:\n'
+              printf 'git add <resolved-files>\n'
+              printf 'git rebase --continue\n'
+              printf 'git push --force-with-lease\n'
+              printf '```\n'
+            } > "$COMMENT_FILE"
+
+            gh pr comment "${{ github.event.pull_request.number }}" \
+              --repo "${{ github.repository }}" \
+              --body-file "$COMMENT_FILE"
+            rm "$COMMENT_FILE"
+
+            echo "::error::Auto-rebase failed — conflicts detected. See PR comment for the list of conflicting files."
+            exit 1
+          fi
+
+      - name: Parse ci-config.yml
+        id: config
+        run: |
+          python3 - <<'EOF'
+          import yaml, os, sys
+
+          config_path = "ci-config.yml"
+          if not os.path.exists(config_path):
+              print("::error::ci-config.yml not found in repo root.", file=sys.stderr)
+              sys.exit(1)
+
+          with open(config_path) as f:
+              c = yaml.safe_load(f)
+
+          required = ["domain", "prod_workspace_id", "prod_workspace_name",
+                      "prod_lakehouse_id", "prod_lakehouse_name", "prod_schema", "notebook_glob"]
+          missing = [k for k in required if k not in c]
+          if missing:
+              print(f"::error::ci-config.yml is missing required keys: {missing}", file=sys.stderr)
+              sys.exit(1)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              for k, v in c.items():
+                  out.write(f"{k}={v}\n")
+
+          print(f"Config loaded: domain={c['domain']}")
+          EOF
+
+      - name: Compute ephemeral workspace name
+        id: names
+        run: |
+          NAME="vibedata-ephemeral-${{ github.event.repository.name }}-${{ github.event.pull_request.number }}"
+          echo "ephemeral_name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "Ephemeral workspace name: ${NAME}"
+
+  # ─── PROVISION ────────────────────────────────────────────────────────────
+  # 1. KV UAMI: fetch vibedata-fabric-capacity-id from Key Vault → GITHUB_ENV
+  # 2. Fabric UAMI: find-or-create workspace + lakehouse
+  provision:
+    needs: preflight
+    runs-on: ubuntu-latest
+    outputs:
+      ephemeral_workspace_id: ${{ steps.provision.outputs.workspace_id }}
+      ephemeral_lakehouse_id: ${{ steps.provision.outputs.lakehouse_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - run: pip install pyyaml --quiet
+
+      - name: Login — KV UAMI
+        uses: azure/login@v2
+        with:
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          client-id: ${{ vars.AZURE_KV_CLIENT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Fetch Fabric capacity ID from Key Vault
+        env:
+          AZURE_KEYVAULT_URL: ${{ vars.AZURE_KEYVAULT_URL }}
+        run: python3 ${{ env.SCRIPTS }}/kv_utils.py fetch-fabric
+
+      - name: Login — Fabric UAMI
+        uses: azure/login@v2
+        with:
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          client-id: ${{ vars.AZURE_FABRIC_CLIENT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Provision ephemeral workspace and lakehouse
+        id: provision
+        env:
+          EPHEMERAL_NAME: ${{ needs.preflight.outputs.ephemeral_name }}
+        run: python3 ${{ env.SCRIPTS }}/fabric_api.py provision --name "$EPHEMERAL_NAME"
+
+  # ─── STATIC ANALYSIS ──────────────────────────────────────────────────────
+  # 1. Run linting tools (no Azure needed)
+  # 2. KV UAMI: fetch GitHub App config → GITHUB_ENV
+  # 3. Fabric UAMI: upload injected notebook to ephemeral workspace
+  static-analysis:
+    needs: [preflight, provision]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install analysis tools
+        run: |
+          pip install ruff sqlfluff pyyaml dbt-core --quiet
+          curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz \
+            | tar xz -C /usr/local/bin gitleaks
+
+      - run: mkdir -p reports
+
+      - name: ruff
+        run: ruff check . --output-format json > reports/ruff.json 2>/dev/null || true
+
+      - name: sqlfluff
+        run: sqlfluff lint models/ --dialect sparksql --format json > reports/sqlfluff.json 2>/dev/null || true
+
+      - name: gitleaks
+        run: |
+          gitleaks detect --source . \
+            --report-format json \
+            --report-path reports/gitleaks.json \
+            --no-banner --exit-code 0 2>/dev/null || true
+
+      - name: dbt scorecard
+        env:
+          WORKSPACE_ID: dummy
+          WORKSPACE_NAME: dummy
+          LAKEHOUSE: dummy
+          LAKEHOUSE_ID: dummy
+          SCHEMA: dummy
+          DBT_JOB_NAME: ci-parse
+        run: |
+          dbt parse --profiles-dir . --quiet 2>/dev/null || true
+          python3 ${{ env.SCRIPTS }}/scorecard.py \
+            --manifest target/manifest.json \
+            --agents-md AGENTS.md \
+            > reports/scorecard.json
+
+      - name: Login — KV UAMI
+        uses: azure/login@v2
+        with:
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          client-id: ${{ vars.AZURE_KV_CLIENT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Fetch GitHub App config from Key Vault
+        env:
+          AZURE_KEYVAULT_URL: ${{ vars.AZURE_KEYVAULT_URL }}
+          GH_APP_ID_KV_NAME: ${{ vars.GH_APP_ID_KV_NAME }}
+          GH_INSTALLATION_ID_KV_NAME: ${{ vars.GH_INSTALLATION_ID_KV_NAME }}
+        run: python3 ${{ env.SCRIPTS }}/kv_utils.py fetch-github-app
+
+      - name: Login — Fabric UAMI
+        uses: azure/login@v2
+        with:
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          client-id: ${{ vars.AZURE_FABRIC_CLIENT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Inject notebook into ephemeral workspace
+        env:
+          AZURE_KEYVAULT_URL: ${{ vars.AZURE_KEYVAULT_URL }}
+          EPHEMERAL_WORKSPACE_ID: ${{ needs.provision.outputs.ephemeral_workspace_id }}
+          EPHEMERAL_WORKSPACE_NAME: ${{ needs.preflight.outputs.ephemeral_name }}
+          EPHEMERAL_LAKEHOUSE_ID: ${{ needs.provision.outputs.ephemeral_lakehouse_id }}
+          NOTEBOOK_GLOB: ${{ needs.preflight.outputs.notebook_glob }}
+          HEAD_BRANCH: ${{ github.head_ref }}
+          REPO_URL: ${{ github.event.repository.clone_url }}
+          GH_APP_PEM_KV_NAME: ${{ vars.GH_APP_PEM_KV_NAME }}
+        run: python3 ${{ env.SCRIPTS }}/inject_notebook.py
+
+      - name: Upload reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ci-reports-pr${{ github.event.pull_request.number }}
+          path: reports/
+          retention-days: 30
+
+  # ─── NOTIFY ───────────────────────────────────────────────────────────────
+  # Posts PR comment with workspace URL + scorecard. No Azure access needed.
+  notify:
+    needs: [preflight, provision, static-analysis]
+    runs-on: ubuntu-latest
+    if: always() && github.event.action != 'closed'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - run: pip install pyyaml --quiet
+
+      - name: Download reports
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-reports-pr${{ github.event.pull_request.number }}
+          path: reports/
+        continue-on-error: true
+
+      - name: Post PR comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EPHEMERAL_WORKSPACE_ID: ${{ needs.provision.outputs.ephemeral_workspace_id }}
+          EPHEMERAL_WORKSPACE_NAME: ${{ needs.preflight.outputs.ephemeral_name }}
+          STATIC_ANALYSIS_OUTCOME: ${{ needs.static-analysis.result }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          HEAD_BRANCH: ${{ github.head_ref }}
+        run: python3 ${{ env.SCRIPTS }}/notify.py
+
+  # ─── TEARDOWN ─────────────────────────────────────────────────────────────
+  # Deletes the ephemeral workspace when PR is closed or merged.
+  # Fabric UAMI only — no KV access needed for teardown.
+  teardown:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Login — Fabric UAMI
+        uses: azure/login@v2
+        with:
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          client-id: ${{ vars.AZURE_FABRIC_CLIENT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Delete ephemeral workspace
+        env:
+          EPHEMERAL_NAME: vibedata-ephemeral-${{ github.event.repository.name }}-${{ github.event.pull_request.number }}
+        run: python3 ${{ env.SCRIPTS }}/fabric_api.py teardown --name "$EPHEMERAL_NAME"

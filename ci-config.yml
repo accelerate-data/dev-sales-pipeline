@@ -1,0 +1,16 @@
+# Domain CI Configuration
+#
+# Copy this file to the root of your domain repo and fill in the values.
+# These are non-sensitive — do not store GUIDs as secrets, store them here.
+#
+# VD Studio populates this file automatically at domain setup time.
+
+domain: sales
+
+prod_workspace_id: e8d68e63-2a03-47c9-ba7b-27ff316b001b
+prod_workspace_name: sampledata
+prod_lakehouse_id: fd8a5cce-a23c-4173-b092-8c34b10f84e0
+prod_lakehouse_name: salesforce
+prod_schema: sales_datamart
+
+notebook_glob: "intents/**/notebook.ipynb"

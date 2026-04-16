@@ -1,6 +1,6 @@
 # Ephemeral Fabric CI
 #
-# Thin caller — all logic lives in accelerate-data/domain-cicd-workflows.
+# Thin caller — all logic lives in accelerate-data/vd-domain-cicd-workflows.
 # Domain configuration: ci-config.yml in this repo root.
 # Required secrets: set at GitHub org level (inherited automatically).
 
@@ -18,5 +18,5 @@ permissions:
 
 jobs:
   ci:
-    uses: accelerate-data/domain-cicd-workflows/.github/workflows/domain-ci.yml@main
+    uses: accelerate-data/vd-domain-cicd-workflows/.github/workflows/domain-ci.yml@main
     secrets: inherit

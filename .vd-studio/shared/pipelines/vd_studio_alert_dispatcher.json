@@ -1,0 +1,41 @@
+{
+  "properties": {
+    "description": "Alert dispatcher — wraps notebook that writes pipeline failure events to Azure Storage Queue",
+    "activities": [
+      {
+        "name": "Run Alert Dispatcher",
+        "type": "TridentNotebook",
+        "typeProperties": {
+          "notebookId": "{{NOTEBOOK_ID}}",
+          "workspaceId": "{{WORKSPACE_ID}}",
+          "parameters": {
+            "event_payload": {
+              "value": {
+                "value": "@pipeline().parameters.event_payload",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "queue_scope": {
+              "value": {
+                "value": "@pipeline().parameters.queue_scope",
+                "type": "Expression"
+              },
+              "type": "string"
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "event_payload": {
+        "type": "string",
+        "defaultValue": "{}"
+      },
+      "queue_scope": {
+        "type": "string",
+        "defaultValue": "source"
+      }
+    }
+  }
+}

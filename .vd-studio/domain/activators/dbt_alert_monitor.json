@@ -1,0 +1,61 @@
+{
+  "displayName": "vd_studio_dbt_alert_monitor",
+  "description": "Monitors dbt pipeline failures and triggers alert dispatch to Studio",
+  "entities": [
+    {
+      "uniqueIdentifier": "b1000001-0000-4000-8000-000000000001",
+      "payload": {
+        "name": "VD Studio dbt Alerts",
+        "description": "Container Description",
+        "type": "rthSubscriptions"
+      },
+      "type": "container-v1"
+    },
+    {
+      "uniqueIdentifier": "b1000001-0000-4000-8000-000000000002",
+      "payload": {
+        "name": "Pipeline failure events",
+        "connection": {
+          "scope": "Artifact",
+          "tenantId": "{{TENANT_ID}}",
+          "workspaceId": "{{WORKSPACE_ID}}",
+          "artifactId": "{{MONITORED_PIPELINE_ID}}",
+          "eventGroupType": "Microsoft.Fabric.JobEvents"
+        },
+        "filterSettings": {
+          "eventTypes": [
+            {
+              "name": "Microsoft.Fabric.ItemJobFailed"
+            }
+          ],
+          "filters": []
+        }
+      },
+      "type": "realTimeHubSource-v1"
+    },
+    {
+      "uniqueIdentifier": "b1000001-0000-4000-8000-000000000004",
+      "payload": {
+        "name": "Pipeline failure events",
+        "definition": {
+          "type": "Event",
+          "instance": "{\"steps\":[{\"id\":\"b1000001-0000-4000-8000-000000000010\",\"name\":\"SourceEventStep\",\"rows\":[{\"arguments\":[{\"name\":\"entityId\",\"type\":\"string\",\"value\":\"b1000001-0000-4000-8000-000000000002\"}],\"kind\":\"SourceReference\",\"name\":\"SourceSelector\"}]}],\"templateId\":\"SourceEvent\",\"templateVersion\":\"1.2.4\"}"
+        }
+      },
+      "type": "timeSeriesView-v1"
+    },
+    {
+      "uniqueIdentifier": "b1000001-0000-4000-8000-000000000003",
+      "payload": {
+        "name": "Run alert dispatcher",
+        "fabricItem": {
+          "itemId": "{{DISPATCHER_NOTEBOOK_ID}}",
+          "workspaceId": "{{WORKSPACE_ID}}",
+          "itemType": "SynapseNotebook"
+        },
+        "jobType": "RunNotebook"
+      },
+      "type": "fabricItemAction-v1"
+    }
+  ]
+}

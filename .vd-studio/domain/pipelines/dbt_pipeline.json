@@ -1,0 +1,147 @@
+{
+  "properties": {
+    "description": "dbt transform pipeline — initialized by Studio",
+    "activities": [
+      {
+        "name": "Run dbt Notebook",
+        "type": "TridentNotebook",
+        "dependsOn": [],
+        "policy": {
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "notebookId": "{{NOTEBOOK_ID}}",
+          "workspaceId": "{{WORKSPACE_ID}}",
+          "parameters": {
+            "command": {
+              "value": {
+                "value": "@pipeline().parameters.command",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "models": {
+              "value": {
+                "value": "@pipeline().parameters.models",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "project_dir": {
+              "value": {
+                "value": "@pipeline().parameters.project_dir",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "repo_url": {
+              "value": {
+                "value": "@pipeline().parameters.repo_url",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "repo_branch": {
+              "value": {
+                "value": "@pipeline().parameters.repo_branch",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "vault_url": {
+              "value": {
+                "value": "@pipeline().parameters.vault_url",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "github_pat_secret": {
+              "value": {
+                "value": "@pipeline().parameters.github_pat_secret",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "lakehouse_name": {
+              "value": {
+                "value": "@pipeline().parameters.lakehouse_name",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "lakehouse_id": {
+              "value": {
+                "value": "@pipeline().parameters.lakehouse_id",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "schema_name": {
+              "value": {
+                "value": "@pipeline().parameters.schema_name",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "workspace_id": {
+              "value": {
+                "value": "@pipeline().parameters.workspace_id",
+                "type": "Expression"
+              },
+              "type": "string"
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "command": {
+        "type": "string",
+        "defaultValue": "run"
+      },
+      "models": {
+        "type": "string",
+        "defaultValue": ""
+      },
+      "project_dir": {
+        "type": "string",
+        "defaultValue": "/tmp/dbt_project"
+      },
+      "repo_url": {
+        "type": "string",
+        "defaultValue": "{{REPO_URL}}"
+      },
+      "repo_branch": {
+        "type": "string",
+        "defaultValue": "main"
+      },
+      "vault_url": {
+        "type": "string",
+        "defaultValue": "{{VAULT_URL}}"
+      },
+      "github_pat_secret": {
+        "type": "string",
+        "defaultValue": "{{GITHUB_PAT_SECRET}}"
+      },
+      "lakehouse_name": {
+        "type": "string",
+        "defaultValue": "{{LAKEHOUSE_NAME}}"
+      },
+      "lakehouse_id": {
+        "type": "string",
+        "defaultValue": "{{LAKEHOUSE_ID}}"
+      },
+      "schema_name": {
+        "type": "string",
+        "defaultValue": "dbo"
+      },
+      "workspace_id": {
+        "type": "string",
+        "defaultValue": "{{WORKSPACE_ID}}"
+      }
+    }
+  }
+}

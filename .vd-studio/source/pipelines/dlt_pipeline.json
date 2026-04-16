@@ -1,0 +1,114 @@
+{
+  "properties": {
+    "description": "DLT ingestion pipeline — initialized by Studio",
+    "activities": [
+      {
+        "name": "Run dbt Notebook",
+        "type": "TridentNotebook",
+        "dependsOn": [],
+        "policy": {
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "notebookId": "{{NOTEBOOK_ID}}",
+          "workspaceId": "{{WORKSPACE_ID}}",
+          "parameters": {
+            "source_name": {
+              "value": {
+                "value": "@pipeline().parameters.source_name",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "vault_url": {
+              "value": {
+                "value": "@pipeline().parameters.vault_url",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "source_config_json": {
+              "value": {
+                "value": "@pipeline().parameters.source_config_json",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "is_incremental": {
+              "value": {
+                "value": "@pipeline().parameters.is_incremental",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "github_token": {
+              "value": {
+                "value": "@pipeline().parameters.github_token",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "run_dq": {
+              "value": {
+                "value": "@pipeline().parameters.run_dq",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "dq_repo_url": {
+              "value": {
+                "value": "@pipeline().parameters.dq_repo_url",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "dq_repo_branch": {
+              "value": {
+                "value": "@pipeline().parameters.dq_repo_branch",
+                "type": "Expression"
+              },
+              "type": "string"
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "source_name": {
+        "type": "string",
+        "defaultValue": "{{SOURCE_NAME}}"
+      },
+      "vault_url": {
+        "type": "string",
+        "defaultValue": "{{VAULT_URL}}"
+      },
+      "source_config_json": {
+        "type": "string",
+        "defaultValue": "{{SOURCE_CONFIG_JSON}}"
+      },
+      "is_incremental": {
+        "type": "string",
+        "defaultValue": "false"
+      },
+      "github_token": {
+        "type": "string",
+        "defaultValue": "{{GITHUB_TOKEN}}"
+      },
+      "run_dq": {
+        "type": "string",
+        "defaultValue": "False"
+      },
+      "dq_repo_url": {
+        "type": "string",
+        "defaultValue": ""
+      },
+      "dq_repo_branch": {
+        "type": "string",
+        "defaultValue": "main"
+      }
+    }
+  }
+}

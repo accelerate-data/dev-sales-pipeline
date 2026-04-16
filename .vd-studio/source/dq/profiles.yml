@@ -1,0 +1,25 @@
+vd_dq:
+  outputs:
+    dev:
+      authentication: fabric_notebook
+      connect_retries: 2
+      connect_timeout: 500
+      endpoint: https://msitapi.fabric.microsoft.com/v1
+      database: "{{ env_var('LAKEHOUSE') }}"
+      lakehouse: "{{ env_var('LAKEHOUSE') }}"
+      lakehouse_schemas_enabled: true
+      reuse_livy_session: true
+      session_id_file: /tmp/livy-session-id.txt
+      lakehouseid: "{{ env_var('LAKEHOUSE_ID') }}"
+      method: livy
+      schema: "{{ env_var('SCHEMA') }}"
+      spark_config:
+        name: "{{ env_var('DBT_JOB_NAME') }}"
+        driverCores: 4
+        driverMemory: 28g
+        executorCores: 4
+        executorMemory: 28g
+      threads: 10
+      type: fabricspark
+      workspaceid: "{{ env_var('WORKSPACE_ID') }}"
+  target: dev

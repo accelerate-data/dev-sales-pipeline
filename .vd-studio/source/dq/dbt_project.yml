@@ -1,0 +1,17 @@
+name: 'vd_dq'
+version: '1.0.0'
+profile: 'vd_dq'
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+seed-paths: ["seeds"]
+snapshot-paths: ["snapshots"]
+clean-targets: ["target", "dbt_packages"]
+dispatch:
+  - macro_namespace: elementary
+    search_order:
+      - elementary_fabricspark
+      - elementary
+models:
+  elementary:
+    +schema: elementary

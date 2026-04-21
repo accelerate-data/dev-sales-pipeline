@@ -95,7 +95,7 @@ def substitute_parameters_cell(notebook: dict) -> dict:
         f'github_installation_id = "{github_installation_id}"\n',
         f'github_pem_secret = "{github_pem_secret}"\n',
         f'vault_url = "{vault_url}"\n',
-        f'lakehouse_name = "vibedata-ephemeral-lh"\n',
+        f'lakehouse_name = "vibedata_ephemeral_lh"\n',
         f'lakehouse_id = "{lakehouse_id}"\n',
         f'workspace_id = "{workspace_id}"\n',
         f'workspace_name = "{workspace_name}"\n',

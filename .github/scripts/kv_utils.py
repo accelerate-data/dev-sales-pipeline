@@ -72,6 +72,17 @@ def mask_value(value: str):
     print(f"::add-mask::{value}", flush=True)
 
 
+def normalize_pem(pem: str) -> str:
+    """Convert literal \\n escape sequences to actual newlines.
+
+    Key Vault sometimes stores PEMs as a single-line string with literal
+    backslash-n characters (e.g. pasted from `awk '{printf "%s\\n", $0}'`).
+    actions/create-github-app-token passes the value to Node's createPrivateKey,
+    which requires actual newlines or raises ERR_OSSL_UNSUPPORTED.
+    """
+    return pem.replace("\\n", "\n")
+
+
 def cmd_fetch_fabric():
     """Fetch Fabric capacity ID and write to GITHUB_ENV."""
     capacity_id = get_secret("vibedata-fabric-capacity-id")
@@ -109,7 +120,7 @@ def cmd_fetch_app_token_creds():
     pem_secret_name = os.environ.get("GH_APP_PEM_KV_NAME", "vibedata-github-app-pem")
 
     app_id = get_secret(app_id_secret_name)
-    pem = get_secret(pem_secret_name)
+    pem = normalize_pem(get_secret(pem_secret_name))
 
     mask_value(pem)
     write_env("GH_APP_ID_VALUE", app_id)

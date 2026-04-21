@@ -14,6 +14,7 @@ import tempfile
 
 
 FABRIC_WORKSPACE_URL = "https://app.fabric.microsoft.com/groups/{workspace_id}/list"
+COMMENT_MARKER = "<!-- ephemeral-workspace-ready -->"
 
 
 def load_report(path: str) -> dict:
@@ -82,7 +83,8 @@ def build_comment(
     gl_icon, gl_detail = format_gitleaks(gitleaks)
     sc_icon, sc_detail = format_scorecard(scorecard)
 
-    return f"""## Ephemeral Workspace Ready
+    return f"""{COMMENT_MARKER}
+## Ephemeral Workspace Ready
 
 **Workspace:** [{workspace_name}]({ws_url})
 **Branch:** `{head_branch}`
@@ -106,6 +108,16 @@ def build_comment(
 
 > CI reports available as workflow artifacts.
 """
+
+
+def _find_existing_comment(pr_number: str, repo: str) -> str | None:
+    result = subprocess.run(
+        ["gh", "api", f"repos/{repo}/issues/{pr_number}/comments",
+         "--jq", f'.[] | select(.body | contains("{COMMENT_MARKER}")) | .id'],
+        capture_output=True, text=True,
+    )
+    comment_id = result.stdout.strip().splitlines()[0] if result.stdout.strip() else None
+    return comment_id
 
 
 def main():
@@ -132,26 +144,25 @@ def main():
         analysis_outcome=analysis_outcome,
     )
 
-    # Write to temp file and post via gh CLI
     with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
         tmp.write(comment)
         tmp_path = tmp.name
 
     try:
-        result = subprocess.run(
-            ["gh", "pr", "comment", pr_number,
-             "--repo", repo,
-             "--body-file", tmp_path,
-             "--edit-last"],
-            capture_output=True, text=True
-        )
-        if result.returncode != 0:
-            # No existing comment to edit — create a new one
+        comment_id = _find_existing_comment(pr_number, repo)
+        if comment_id:
+            result = subprocess.run(
+                ["gh", "api", "--method", "PATCH",
+                 f"repos/{repo}/issues/comments/{comment_id}",
+                 "--field", f"body=@{tmp_path}"],
+                capture_output=True, text=True,
+            )
+        else:
             result = subprocess.run(
                 ["gh", "pr", "comment", pr_number,
                  "--repo", repo,
                  "--body-file", tmp_path],
-                capture_output=True, text=True
+                capture_output=True, text=True,
             )
         if result.returncode != 0:
             print(f"Failed to post PR comment: {result.stderr}", file=sys.stderr)

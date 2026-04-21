@@ -1,4 +1,4 @@
-"""Unit tests for kv_utils helper functions (write_env_multiline, mask_value, normalize_pem, cmd_fetch_app_token_creds)."""
+"""Unit tests for kv_utils helper functions (write_env_multiline, mask_value, normalize_pem, log_pem_info, cmd_fetch_app_token_creds)."""
 import os
 import sys
 import tempfile
@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".github"))
-from scripts.kv_utils import write_env, write_env_multiline, mask_value, normalize_pem, cmd_fetch_app_token_creds
+from scripts.kv_utils import write_env, write_env_multiline, mask_value, normalize_pem, log_pem_info, cmd_fetch_app_token_creds
 
 
 # ─── write_env_multiline ──────────────────────────────────────────────────────
@@ -90,6 +90,48 @@ def test_normalize_pem_no_header():
     """Bare base64 blob with literal \\n still gets normalized."""
     result = normalize_pem("abc\\ndef\\nghi")
     assert result == "abc\ndef\nghi"
+
+
+def test_normalize_pem_strips_utf8_bom():
+    bom_pem = "﻿-----BEGIN RSA PRIVATE KEY-----\nABC\n-----END RSA PRIVATE KEY-----"
+    result = normalize_pem(bom_pem)
+    assert result.startswith("-----BEGIN")
+    assert "﻿" not in result
+
+
+def test_normalize_pem_crlf_line_endings():
+    crlf_pem = "-----BEGIN RSA PRIVATE KEY-----\r\nABC\r\n-----END RSA PRIVATE KEY-----"
+    result = normalize_pem(crlf_pem)
+    assert "\r" not in result
+    assert result == _PROPER_PEM.replace("ABCDEF1234567890", "ABC")
+
+
+def test_normalize_pem_strips_trailing_spaces():
+    spaced = "-----BEGIN RSA PRIVATE KEY-----   \nABCDEF1234567890  \n-----END RSA PRIVATE KEY-----"
+    result = normalize_pem(spaced)
+    assert result == _PROPER_PEM
+    assert "   " not in result
+
+
+# ─── log_pem_info ─────────────────────────────────────────────────────────────
+
+def test_log_pem_info_clean_pem(capsys):
+    log_pem_info(_PROPER_PEM)
+    out = capsys.readouterr().out
+    assert "-----BEGIN RSA PRIVATE KEY-----" in out
+    assert "none" in out
+
+
+def test_log_pem_info_flags_anomalies(capsys):
+    log_pem_info(_LITERAL_NL_PEM)
+    out = capsys.readouterr().out
+    assert "literal-backslash-n" in out
+
+
+def test_log_pem_info_flags_bom(capsys):
+    log_pem_info("﻿-----BEGIN RSA PRIVATE KEY-----\nABC\n-----END RSA PRIVATE KEY-----")
+    out = capsys.readouterr().out
+    assert "BOM" in out
 
 
 # ─── cmd_fetch_app_token_creds ────────────────────────────────────────────────

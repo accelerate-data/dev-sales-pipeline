@@ -7,6 +7,7 @@
 # Required GitHub Variables (set at org or repo level):
 #   AZURE_TENANT_ID, AZURE_KV_CLIENT_ID, AZURE_FABRIC_CLIENT_ID, AZURE_KEYVAULT_URL
 #   GH_APP_ID_KV_NAME, GH_INSTALLATION_ID_KV_NAME, GH_APP_PEM_KV_NAME
+#   FABRIC_CAPACITY_ID_KV_NAME  (optional — defaults to "vibedata-fabric-capacity-id")
 
 name: Ephemeral Fabric CI
 
@@ -185,6 +186,7 @@ jobs:
       - name: Fetch Fabric capacity ID from Key Vault
         env:
           AZURE_KEYVAULT_URL: ${{ vars.AZURE_KEYVAULT_URL }}
+          FABRIC_CAPACITY_ID_KV_NAME: ${{ vars.FABRIC_CAPACITY_ID_KV_NAME }}
         run: python3 ${{ env.SCRIPTS }}/kv_utils.py fetch-fabric
 
       - name: Login — Fabric UAMI
@@ -216,7 +218,7 @@ jobs:
 
       - name: Install analysis tools
         run: |
-          pip install ruff sqlfluff pyyaml dbt-core --quiet
+          pip install ruff sqlfluff pyyaml dbt-core dbt-duckdb --quiet
           curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz \
             | tar xz -C /usr/local/bin gitleaks
 
@@ -244,7 +246,7 @@ jobs:
           SCHEMA: dummy
           DBT_JOB_NAME: ci-parse
         run: |
-          dbt parse --profiles-dir . --quiet 2>/dev/null || true
+          dbt parse --profiles-dir .github/profiles --target dbt_quality --quiet 2>/dev/null || true
           python3 ${{ env.SCRIPTS }}/scorecard.py \
             --manifest target/manifest.json \
             --agents-md AGENTS.md \

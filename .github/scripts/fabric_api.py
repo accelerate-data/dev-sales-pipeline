@@ -119,14 +119,14 @@ def cmd_provision(args):
         workspace_id = ws["id"]
         print(f"Workspace created: {workspace_id}", flush=True)
 
-    lh = find_lakehouse_by_name(workspace_id, "vibedata-ephemeral-lh", token)
+    lh = find_lakehouse_by_name(workspace_id, "vibedata_ephemeral_lh", token)
     if lh:
         lakehouse_id = lh["id"]
-        print(f"Reusing existing lakehouse: vibedata-ephemeral-lh ({lakehouse_id})", flush=True)
+        print(f"Reusing existing lakehouse: vibedata_ephemeral_lh ({lakehouse_id})", flush=True)
     else:
-        print("Creating lakehouse: vibedata-ephemeral-lh", flush=True)
+        print("Creating lakehouse: vibedata_ephemeral_lh", flush=True)
         lh = fabric_request("POST", f"/workspaces/{workspace_id}/items", token, {
-            "displayName": "vibedata-ephemeral-lh",
+            "displayName": "vibedata_ephemeral_lh",
             "type": "Lakehouse",
         })
         lakehouse_id = lh["id"]

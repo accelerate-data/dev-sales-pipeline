@@ -149,6 +149,9 @@ def cmd_fetch_app_token_creds():
     log_pem_info(raw_pem)
     pem = normalize_pem(raw_pem)
 
+    # Normalize PEM: Key Vault may store with literal \n sequences or \r\n endings
+    pem = pem.replace('\\n', '\n').replace('\r\n', '\n').replace('\r', '').strip() + '\n'
+
     mask_value(pem)
     write_env("GH_APP_ID_VALUE", app_id)
     write_env_multiline("GH_APP_PEM_VALUE", pem)

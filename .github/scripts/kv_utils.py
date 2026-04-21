@@ -110,7 +110,8 @@ def log_pem_info(pem: str) -> None:
 
 def cmd_fetch_fabric():
     """Fetch Fabric capacity ID and write to GITHUB_ENV."""
-    capacity_id = get_secret("vibedata-fabric-capacity-id")
+    secret_name = os.environ.get("FABRIC_CAPACITY_ID_KV_NAME", "vibedata-fabric-capacity-id")
+    capacity_id = get_secret(secret_name)
     write_env("FABRIC_CAPACITY_ID", capacity_id)
     print("Fetched: FABRIC_CAPACITY_ID", flush=True)
 

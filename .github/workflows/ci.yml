@@ -246,6 +246,7 @@ jobs:
           SCHEMA: dummy
           DBT_JOB_NAME: ci-parse
         run: |
+          dbt deps --quiet 2>/dev/null || true
           dbt parse --profiles-dir .github/profiles --target dbt_quality --quiet 2>/dev/null || true
           python3 ${{ env.SCRIPTS }}/scorecard.py \
             --manifest target/manifest.json \

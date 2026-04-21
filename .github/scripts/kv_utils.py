@@ -121,8 +121,8 @@ def cmd_fetch_github_app():
     The PEM secret name is passed through as-is — the Fabric notebook
     fetches the actual PEM at runtime using its own KV access.
     """
-    app_id_secret_name = os.environ.get("GH_APP_ID_KV_NAME", "vibedata-github-app-id")
-    install_id_secret_name = os.environ.get("GH_INSTALLATION_ID_KV_NAME", "vibedata-github-installation-id")
+    app_id_secret_name = os.environ.get("GH_APP_ID_KV_NAME") or "vibedata-github-app-id"
+    install_id_secret_name = os.environ.get("GH_INSTALLATION_ID_KV_NAME") or "vibedata-github-installation-id"
 
     app_id = get_secret(app_id_secret_name)
     installation_id = get_secret(install_id_secret_name)

@@ -116,4 +116,4 @@ final as (
 )
 
 select * from final
--- vd-1548 app token test
+-- vd-1548 app token test: pem normalization fix

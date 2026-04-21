@@ -22,6 +22,7 @@ Required env var:
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -99,11 +100,43 @@ def write_github_output(key: str, value: str):
         print(f"GITHUB_OUTPUT not set; {key}={value}")
 
 
+_GUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def resolve_capacity_id(raw: str, token: str) -> str:
+    """Return the Fabric capacity GUID from either a bare GUID or an ARM resource ID.
+
+    Some Key Vault setups store the full ARM resource ID
+    (/subscriptions/.../providers/Microsoft.Fabric/capacities/<name>) instead of
+    the GUID. When that form is detected, the Fabric capacities API is queried and
+    the match is made on display name (case-insensitive).
+    """
+    if _GUID_RE.match(raw):
+        return raw
+    if raw.startswith("/subscriptions/"):
+        arm_name = raw.rstrip("/").rsplit("/", 1)[-1].lower()
+        print(f"FABRIC_CAPACITY_ID is an ARM resource ID; resolving '{arm_name}' via Fabric API…", flush=True)
+        resp = fabric_request("GET", "/capacities", token)
+        for cap in resp.get("value", []):
+            if cap.get("displayName", "").lower() == arm_name:
+                guid = cap["id"]
+                print(f"Resolved capacity GUID: {guid}", flush=True)
+                return guid
+        raise RuntimeError(
+            f"No Fabric capacity with displayName '{arm_name}' found via GET /v1/capacities. "
+            f"Store the capacity GUID directly in the KV secret to avoid this lookup."
+        )
+    raise RuntimeError(f"FABRIC_CAPACITY_ID is neither a GUID nor an ARM resource ID: {raw!r}")
+
+
 # ─── Commands ─────────────────────────────────────────────────────────────────
 
 def cmd_provision(args):
     token = get_fabric_token()
-    capacity_id = os.environ["FABRIC_CAPACITY_ID"]  # written to GITHUB_ENV by kv_utils fetch-fabric
+    capacity_id = resolve_capacity_id(os.environ["FABRIC_CAPACITY_ID"], token)
     name = args.name
 
     ws = find_workspace_by_name(name, token)

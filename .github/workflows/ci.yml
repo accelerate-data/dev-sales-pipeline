@@ -7,6 +7,7 @@
 # Required GitHub Variables (set at org or repo level):
 #   AZURE_TENANT_ID, AZURE_KV_CLIENT_ID, AZURE_FABRIC_CLIENT_ID, AZURE_KEYVAULT_URL
 #   GH_APP_ID_KV_NAME, GH_INSTALLATION_ID_KV_NAME, GH_APP_PEM_KV_NAME
+#   FABRIC_CAPACITY_ID_KV_NAME  (optional — defaults to "vibedata-fabric-capacity-id")
 
 name: Ephemeral Fabric CI
 
@@ -185,6 +186,7 @@ jobs:
       - name: Fetch Fabric capacity ID from Key Vault
         env:
           AZURE_KEYVAULT_URL: ${{ vars.AZURE_KEYVAULT_URL }}
+          FABRIC_CAPACITY_ID_KV_NAME: ${{ vars.FABRIC_CAPACITY_ID_KV_NAME }}
         run: python3 ${{ env.SCRIPTS }}/kv_utils.py fetch-fabric
 
       - name: Login — Fabric UAMI

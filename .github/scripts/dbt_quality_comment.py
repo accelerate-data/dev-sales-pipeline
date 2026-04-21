@@ -23,6 +23,7 @@ CATEGORIES = {
 }
 
 EVALUATOR_DOCS_URL = "https://dbt-labs.github.io/dbt-project-evaluator/latest/"
+COMMENT_MARKER = "<!-- dbt-quality-evaluator -->"
 
 
 def query_violations(db_path: str) -> dict[str, list[dict]]:
@@ -97,7 +98,8 @@ def build_comment(violations: dict[str, list[dict]]) -> str:
         else ""
     )
 
-    return f"""## dbt Project Evaluator
+    return f"""{COMMENT_MARKER}
+## dbt Project Evaluator
 
 | Category | Violations |
 |----------|-----------|
@@ -109,21 +111,32 @@ def build_comment(violations: dict[str, list[dict]]) -> str:
 """
 
 
+def _find_existing_comment(pr_number: str, repo: str) -> str | None:
+    """Return the comment ID of a previous evaluator comment, or None."""
+    result = subprocess.run(
+        ["gh", "api", f"repos/{repo}/issues/{pr_number}/comments",
+         "--jq", f'.[] | select(.body | contains("{COMMENT_MARKER}")) | .id'],
+        capture_output=True, text=True,
+    )
+    comment_id = result.stdout.strip().splitlines()[0] if result.stdout.strip() else None
+    return comment_id
+
+
 def post_comment(comment: str, pr_number: str, repo: str) -> None:
     with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
         tmp.write(comment)
         tmp_path = tmp.name
 
     try:
-        result = subprocess.run(
-            ["gh", "pr", "comment", pr_number,
-             "--repo", repo,
-             "--body-file", tmp_path,
-             "--edit-last"],
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            # No existing evaluator comment — create a new one
+        comment_id = _find_existing_comment(pr_number, repo)
+        if comment_id:
+            result = subprocess.run(
+                ["gh", "api", "--method", "PATCH",
+                 f"repos/{repo}/issues/comments/{comment_id}",
+                 "--field", f"body=@{tmp_path}"],
+                capture_output=True, text=True,
+            )
+        else:
             result = subprocess.run(
                 ["gh", "pr", "comment", pr_number,
                  "--repo", repo,

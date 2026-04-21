@@ -35,9 +35,10 @@ def format_ruff(report: list) -> tuple[str, int]:
     return status, detail
 
 
-def format_sqlfluff(report: dict) -> tuple[str, int]:
+def format_sqlfluff(report) -> tuple[str, str]:
+    file_results = report if isinstance(report, list) else report.get("files", [])
     violations = []
-    for file_result in report.get("files", []):
+    for file_result in file_results:
         violations.extend(file_result.get("violations", []))
     count = len(violations)
     status = icon(count == 0)

@@ -14,4 +14,4 @@ prod_lakehouse_name: salesforce
 prod_schema: sales_datamart
 
 notebook_glob: "intents/**/notebook.ipynb"
-ephemeral_lakehouse_name: "vibedata-ephemeral-lh-new-intent-96194698"
+ephemeral_lakehouse_name: "vibedataLh96194698"

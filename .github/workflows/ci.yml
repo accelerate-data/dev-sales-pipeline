@@ -7,6 +7,8 @@
 # Required GitHub Variables (set at org or repo level):
 #   AZURE_TENANT_ID, AZURE_KV_CLIENT_ID, AZURE_FABRIC_CLIENT_ID, AZURE_KEYVAULT_URL
 #   GH_APP_ID_KV_NAME, GH_INSTALLATION_ID_KV_NAME, GH_APP_PEM_KV_NAME
+#   FABRIC_CAPACITY_ID_KV_NAME  (optional — defaults to "vibedata-fabric-capacity-id")
+#   AAD_DOMAIN  (optional — UPN domain for PR author lookup, defaults to eng.acceleratedata.ai)
 
 name: Ephemeral Fabric CI
 
@@ -185,6 +187,7 @@ jobs:
       - name: Fetch Fabric capacity ID from Key Vault
         env:
           AZURE_KEYVAULT_URL: ${{ vars.AZURE_KEYVAULT_URL }}
+          FABRIC_CAPACITY_ID_KV_NAME: ${{ vars.FABRIC_CAPACITY_ID_KV_NAME }}
         run: python3 ${{ env.SCRIPTS }}/kv_utils.py fetch-fabric
 
       - name: Login — Fabric UAMI
@@ -199,6 +202,15 @@ jobs:
         env:
           EPHEMERAL_NAME: ${{ needs.preflight.outputs.ephemeral_name }}
         run: python3 ${{ env.SCRIPTS }}/fabric_api.py provision --name "$EPHEMERAL_NAME"
+
+      - name: Add PR author as Contributor on ephemeral workspace
+        env:
+          AAD_DOMAIN: ${{ vars.AAD_DOMAIN }}
+          AAD_UPN_OVERRIDE: ${{ vars.AAD_UPN_OVERRIDE }}
+        run: |
+          python3 ${{ env.SCRIPTS }}/fabric_api.py add-contributor \
+            --workspace-id "${{ steps.provision.outputs.workspace_id }}" \
+            --github-login "${{ github.event.pull_request.user.login }}"
 
   # ─── STATIC ANALYSIS ──────────────────────────────────────────────────────
   # 1. Run linting tools (no Azure needed)

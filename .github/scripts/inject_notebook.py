@@ -61,11 +61,11 @@ def fabric_request(method: str, path: str, token: str, body: dict = None) -> dic
         raise
 
 
-def find_notebook(glob_pattern: str) -> str:
+def find_notebook(glob_pattern: str) -> str | None:
     matches = glob.glob(glob_pattern, recursive=True)
     if not matches:
-        print(f"No notebook found matching: {glob_pattern}", file=sys.stderr)
-        sys.exit(1)
+        print(f"No notebook found matching: {glob_pattern} — skipping injection.", flush=True)
+        return None
     if len(matches) > 1:
         print(f"Multiple notebooks found: {matches}. Using first: {matches[0]}", flush=True)
     return matches[0]
@@ -95,7 +95,7 @@ def substitute_parameters_cell(notebook: dict) -> dict:
         f'github_installation_id = "{github_installation_id}"\n',
         f'github_pem_secret = "{github_pem_secret}"\n',
         f'vault_url = "{vault_url}"\n',
-        f'lakehouse_name = "vibedata-ephemeral-lh"\n',
+        f'lakehouse_name = "vibedata_ephemeral_lh"\n',
         f'lakehouse_id = "{lakehouse_id}"\n',
         f'workspace_id = "{workspace_id}"\n',
         f'workspace_name = "{workspace_name}"\n',
@@ -216,6 +216,8 @@ def main():
     notebook_glob = os.environ["NOTEBOOK_GLOB"]
 
     notebook_path = find_notebook(notebook_glob)
+    if notebook_path is None:
+        return
     print(f"Found notebook: {notebook_path}", flush=True)
 
     with open(notebook_path) as f:

@@ -13,4 +13,4 @@ prod_lakehouse_id: fd8a5cce-a23c-4173-b092-8c34b10f84e0
 prod_lakehouse_name: salesforce
 prod_schema: sales_datamart
 
-notebook_glob: "intents/**/notebook.ipynb"
+notebook_glob: "intents/**/*.ipynb"

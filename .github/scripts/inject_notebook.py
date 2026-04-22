@@ -29,11 +29,14 @@ import json
 import os
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 
 
 FABRIC_API = "https://api.fabric.microsoft.com/v1"
+FABRIC_POLL_TIMEOUT_S = 120
+FABRIC_POLL_INTERVAL_S = 5
 
 
 def get_fabric_token() -> str:
@@ -61,11 +64,81 @@ def fabric_request(method: str, path: str, token: str, body: dict = None) -> dic
         raise
 
 
-def find_notebook(glob_pattern: str) -> str:
+def _fabric_post(path: str, token: str, body: dict) -> tuple[int, str | None, dict]:
+    """POST to Fabric API; returns (status_code, operation_url_or_None, body_dict).
+
+    The operation URL is sourced from the Location response header, falling back
+    to constructing it from operationId in the response body. Returns None when
+    neither is present (callers must raise if they required an operation URL).
+    """
+    url = f"{FABRIC_API}{path}"
+    data = json.dumps(body).encode()
+    req = urllib.request.Request(url, data=data, method="POST")
+    req.add_header("Authorization", f"Bearer {token}")
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req) as resp:
+            status = resp.status
+            location = resp.getheader("Location")
+            raw = resp.read()
+            parsed = json.loads(raw) if raw else {}
+            if not location and "operationId" in parsed:
+                location = f"{FABRIC_API}/operations/{parsed['operationId']}"
+            return status, location, parsed
+    except urllib.error.HTTPError as e:
+        print(f"HTTP {e.code} POST {url}: {e.read().decode(errors='replace')}", file=sys.stderr)
+        raise
+
+
+def poll_fabric_operation(
+    operation_url: str | None,
+    token: str,
+    timeout_s: int = FABRIC_POLL_TIMEOUT_S,
+    poll_interval_s: int = FABRIC_POLL_INTERVAL_S,
+) -> None:
+    """Poll a Fabric long-running operation URL until Succeeded; raise on failure or timeout."""
+    if not operation_url:
+        raise RuntimeError(
+            "Fabric returned 202 Accepted but no operation URL was found in the "
+            "Location header or response body."
+        )
+    print(f"Polling Fabric operation: {operation_url}", flush=True)
+    deadline = time.monotonic() + timeout_s
+    last_status = "Unknown"
+    attempt = 0
+    while time.monotonic() < deadline:
+        attempt += 1
+        req = urllib.request.Request(operation_url, method="GET")
+        req.add_header("Authorization", f"Bearer {token}")
+        try:
+            with urllib.request.urlopen(req) as resp:
+                result = json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            body_text = e.read().decode(errors="replace")
+            raise RuntimeError(
+                f"Failed to poll Fabric operation (HTTP {e.code}): {body_text}"
+            ) from e
+        last_status = result.get("status", "Unknown")
+        print(f"  Operation status [{attempt}]: {last_status}", flush=True)
+        if last_status == "Succeeded":
+            return
+        if last_status == "Failed":
+            error = result.get("error", {})
+            msg = f"{error.get('errorCode', 'UnknownError')}: {error.get('message', str(result))}"
+            raise RuntimeError(f"Fabric operation failed — {msg}")
+        time.sleep(poll_interval_s)
+    raise RuntimeError(
+        f"Fabric operation timed out after {timeout_s}s "
+        f"(last status: {last_status!r}). "
+        "The notebook may not be available in the workspace."
+    )
+
+
+def find_notebook(glob_pattern: str) -> str | None:
     matches = glob.glob(glob_pattern, recursive=True)
     if not matches:
-        print(f"No notebook found matching: {glob_pattern}", file=sys.stderr)
-        sys.exit(1)
+        print(f"No notebook found matching: {glob_pattern} — skipping injection.", flush=True)
+        return None
     if len(matches) > 1:
         print(f"Multiple notebooks found: {matches}. Using first: {matches[0]}", flush=True)
     return matches[0]
@@ -95,7 +168,7 @@ def substitute_parameters_cell(notebook: dict) -> dict:
         f'github_installation_id = "{github_installation_id}"\n',
         f'github_pem_secret = "{github_pem_secret}"\n',
         f'vault_url = "{vault_url}"\n',
-        f'lakehouse_name = "vibedata-ephemeral-lh"\n',
+        f'lakehouse_name = "vibedata_ephemeral_lh"\n',
         f'lakehouse_id = "{lakehouse_id}"\n',
         f'workspace_id = "{workspace_id}"\n',
         f'workspace_name = "{workspace_name}"\n',
@@ -179,35 +252,41 @@ def find_existing_notebook(workspace_id: str, display_name: str, token: str) -> 
 def upload_notebook(workspace_id: str, display_name: str, notebook: dict, token: str):
     """Create or update a notebook in the Fabric workspace via Items API."""
     nb_content = base64.b64encode(json.dumps(notebook).encode()).decode()
+    definition = {
+        "parts": [{
+            "path": "notebook-content.ipynb",
+            "payload": nb_content,
+            "payloadType": "InlineBase64",
+        }]
+    }
 
     existing_id = find_existing_notebook(workspace_id, display_name, token)
 
     if existing_id:
         print(f"Updating existing notebook: {display_name} ({existing_id})", flush=True)
-        fabric_request("POST", f"/workspaces/{workspace_id}/items/{existing_id}/updateDefinition", token, {
-            "definition": {
-                "parts": [{
-                    "path": "notebook-content.ipynb",
-                    "payload": nb_content,
-                    "payloadType": "InlineBase64",
-                }]
-            }
-        })
+        status, op_url, _ = _fabric_post(
+            f"/workspaces/{workspace_id}/items/{existing_id}/updateDefinition",
+            token,
+            {"definition": definition},
+        )
     else:
         print(f"Creating notebook: {display_name}", flush=True)
-        fabric_request("POST", f"/workspaces/{workspace_id}/items", token, {
-            "displayName": display_name,
-            "type": "Notebook",
-            "definition": {
-                "parts": [{
-                    "path": "notebook-content.ipynb",
-                    "payload": nb_content,
-                    "payloadType": "InlineBase64",
-                }]
-            }
-        })
+        status, op_url, _ = _fabric_post(
+            f"/workspaces/{workspace_id}/items",
+            token,
+            {"displayName": display_name, "type": "Notebook", "definition": definition},
+        )
 
-    print("Notebook upload complete.", flush=True)
+    if status == 202:
+        poll_fabric_operation(op_url, token)
+        print(f"Notebook '{display_name}' is now available in the workspace.", flush=True)
+    elif status in (200, 201):
+        print("Notebook upload complete.", flush=True)
+    else:
+        raise RuntimeError(
+            f"Unexpected HTTP {status} from Fabric Items API. "
+            "Expected 200, 201, or 202."
+        )
 
 
 def main():
@@ -216,6 +295,8 @@ def main():
     notebook_glob = os.environ["NOTEBOOK_GLOB"]
 
     notebook_path = find_notebook(notebook_glob)
+    if notebook_path is None:
+        return
     print(f"Found notebook: {notebook_path}", flush=True)
 
     with open(notebook_path) as f:

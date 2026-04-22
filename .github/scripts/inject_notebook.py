@@ -134,6 +134,41 @@ def poll_fabric_operation(
     )
 
 
+def ipynb_to_fabric_py(notebook: dict) -> str:
+    """Convert a Jupyter notebook dict to Fabric's Python notebook format.
+
+    Fabric Items API requires path='notebook-content.py' with content in this
+    format — standard Jupyter JSON with path='notebook-content.ipynb' is rejected.
+    """
+    lines = ["# Fabric notebook source\n"]
+
+    metadata = notebook.get("metadata", {})
+    if metadata:
+        lines.append("\n# METADATA ********************\n")
+        for key, value in metadata.items():
+            lines.append(f"# META {json.dumps({key: value})}\n")
+
+    for cell in notebook.get("cells", []):
+        cell_type = cell.get("cell_type", "code")
+        tags = cell.get("metadata", {}).get("tags", [])
+        source = "".join(cell.get("source", []))
+
+        if cell_type == "code":
+            if "parameters" in tags:
+                lines.append("\n# PARAMETERS CELL ********************\n\n")
+            else:
+                lines.append("\n# CELL ********************\n\n")
+            lines.append(source)
+            if source and not source.endswith("\n"):
+                lines.append("\n")
+        elif cell_type == "markdown":
+            lines.append("\n# MARKDOWN CELL ********************\n\n")
+            for md_line in source.splitlines(keepends=True):
+                lines.append(f"# {md_line}" if md_line.strip() else "#\n")
+
+    return "".join(lines)
+
+
 def find_notebook(glob_pattern: str) -> str | None:
     matches = glob.glob(glob_pattern, recursive=True)
     if not matches:
@@ -252,10 +287,10 @@ def find_existing_notebook(workspace_id: str, display_name: str, token: str) -> 
 
 def upload_notebook(workspace_id: str, display_name: str, notebook: dict, token: str):
     """Create or update a notebook in the Fabric workspace via Items API."""
-    nb_content = base64.b64encode(json.dumps(notebook).encode()).decode()
+    nb_content = base64.b64encode(ipynb_to_fabric_py(notebook).encode()).decode()
     definition = {
         "parts": [{
-            "path": "notebook-content.ipynb",
+            "path": "notebook-content.py",
             "payload": nb_content,
             "payloadType": "InlineBase64",
         }]

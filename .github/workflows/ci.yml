@@ -7,6 +7,8 @@
 # Required GitHub Variables (set at org or repo level):
 #   AZURE_TENANT_ID, AZURE_KV_CLIENT_ID, AZURE_FABRIC_CLIENT_ID, AZURE_KEYVAULT_URL
 #   GH_APP_ID_KV_NAME, GH_INSTALLATION_ID_KV_NAME, GH_APP_PEM_KV_NAME
+#   FABRIC_CAPACITY_ID_KV_NAME  (optional — defaults to "vibedata-fabric-capacity-id")
+#   AAD_DOMAIN  (optional — UPN domain for PR author lookup, defaults to eng.acceleratedata.ai)
 
 name: Ephemeral Fabric CI
 
@@ -40,6 +42,7 @@ jobs:
       prod_schema: ${{ steps.config.outputs.prod_schema }}
       notebook_glob: ${{ steps.config.outputs.notebook_glob }}
       ephemeral_name: ${{ steps.names.outputs.ephemeral_name }}
+      ephemeral_lakehouse_name: ${{ steps.config.outputs.ephemeral_lakehouse_name }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -146,6 +149,8 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a") as out:
               for k, v in c.items():
                   out.write(f"{k}={v}\n")
+              lh_name = c.get("ephemeral_lakehouse_name", "vibedata-ephemeral-lh")
+              out.write(f"ephemeral_lakehouse_name={lh_name}\n")
 
           print(f"Config loaded: domain={c['domain']}")
           EOF
@@ -166,6 +171,7 @@ jobs:
     outputs:
       ephemeral_workspace_id: ${{ steps.provision.outputs.workspace_id }}
       ephemeral_lakehouse_id: ${{ steps.provision.outputs.lakehouse_id }}
+      ephemeral_lakehouse_name: ${{ steps.provision.outputs.lakehouse_name }}
     steps:
       - uses: actions/checkout@v4
 
@@ -185,6 +191,7 @@ jobs:
       - name: Fetch Fabric capacity ID from Key Vault
         env:
           AZURE_KEYVAULT_URL: ${{ vars.AZURE_KEYVAULT_URL }}
+          FABRIC_CAPACITY_ID_KV_NAME: ${{ vars.FABRIC_CAPACITY_ID_KV_NAME }}
         run: python3 ${{ env.SCRIPTS }}/kv_utils.py fetch-fabric
 
       - name: Login — Fabric UAMI
@@ -198,7 +205,17 @@ jobs:
         id: provision
         env:
           EPHEMERAL_NAME: ${{ needs.preflight.outputs.ephemeral_name }}
+          EPHEMERAL_LAKEHOUSE_NAME: ${{ needs.preflight.outputs.ephemeral_lakehouse_name }}
         run: python3 ${{ env.SCRIPTS }}/fabric_api.py provision --name "$EPHEMERAL_NAME"
+
+      - name: Add PR author as Contributor on ephemeral workspace
+        env:
+          AAD_DOMAIN: ${{ vars.AAD_DOMAIN }}
+          AAD_UPN_OVERRIDE: ${{ secrets.AAD_UPN_OVERRIDE }}
+        run: |
+          python3 ${{ env.SCRIPTS }}/fabric_api.py add-contributor \
+            --workspace-id "${{ steps.provision.outputs.workspace_id }}" \
+            --github-login "${{ github.event.pull_request.user.login }}"
 
   # ─── STATIC ANALYSIS ──────────────────────────────────────────────────────
   # 1. Run linting tools (no Azure needed)
@@ -216,7 +233,7 @@ jobs:
 
       - name: Install analysis tools
         run: |
-          pip install ruff sqlfluff pyyaml dbt-core --quiet
+          pip install ruff sqlfluff pyyaml dbt-core dbt-duckdb --quiet
           curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz \
             | tar xz -C /usr/local/bin gitleaks
 
@@ -244,7 +261,8 @@ jobs:
           SCHEMA: dummy
           DBT_JOB_NAME: ci-parse
         run: |
-          dbt parse --profiles-dir . --quiet 2>/dev/null || true
+          dbt deps --quiet 2>/dev/null || true
+          dbt parse --profiles-dir .github/profiles --target dbt_quality --quiet 2>/dev/null || true
           python3 ${{ env.SCRIPTS }}/scorecard.py \
             --manifest target/manifest.json \
             --agents-md AGENTS.md \
@@ -277,6 +295,7 @@ jobs:
           EPHEMERAL_WORKSPACE_ID: ${{ needs.provision.outputs.ephemeral_workspace_id }}
           EPHEMERAL_WORKSPACE_NAME: ${{ needs.preflight.outputs.ephemeral_name }}
           EPHEMERAL_LAKEHOUSE_ID: ${{ needs.provision.outputs.ephemeral_lakehouse_id }}
+          EPHEMERAL_LAKEHOUSE_NAME: ${{ needs.provision.outputs.ephemeral_lakehouse_name }}
           NOTEBOOK_GLOB: ${{ needs.preflight.outputs.notebook_glob }}
           HEAD_BRANCH: ${{ github.head_ref }}
           REPO_URL: ${{ github.event.repository.clone_url }}

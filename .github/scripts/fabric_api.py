@@ -171,7 +171,7 @@ def cmd_provision(args):
         workspace_id = ws["id"]
         print(f"Workspace created: {workspace_id}", flush=True)
 
-    lakehouse_name = os.environ.get("EPHEMERAL_LAKEHOUSE_NAME", "vibedataEphemeralLh")
+    lakehouse_name = os.environ.get("EPHEMERAL_LAKEHOUSE_NAME", "vdephelh")
 
     lh = find_lakehouse_by_name(workspace_id, lakehouse_name, token)
     if lh:

@@ -151,7 +151,7 @@ def substitute_parameters_cell(notebook: dict) -> dict:
     workspace_id = os.environ["EPHEMERAL_WORKSPACE_ID"]
     workspace_name = os.environ["EPHEMERAL_WORKSPACE_NAME"]
     lakehouse_id = os.environ["EPHEMERAL_LAKEHOUSE_ID"]
-    lakehouse_name = os.environ.get("EPHEMERAL_LAKEHOUSE_NAME", "vibedataEphemeralLh")
+    lakehouse_name = os.environ.get("EPHEMERAL_LAKEHOUSE_NAME", "vdephelh")
     branch = os.environ["HEAD_BRANCH"]
     repo_url = os.environ["REPO_URL"]
     github_app_id = os.environ.get("GH_APP_ID_KV_NAME", "")

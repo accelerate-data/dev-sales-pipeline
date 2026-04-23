@@ -1,0 +1,112 @@
+version: 2
+
+models:
+  - name: fct_account_scorecard
+    description: |
+      **Account Scorecard** - Monthly sales performance metrics per account.
+
+      This fact table provides a monthly grain view of account health including:
+      - Won revenue totals (full month for historical, MTD for current month)
+      - Pipeline value (open opportunities)
+      - Opportunity counts and win rates
+      - Account attributes (name, type, industry, location)
+
+      Use this for:
+      - Account leaderboards
+      - Sales performance dashboards
+      - Monthly account reviews
+      - Executive reporting
+
+    columns:
+      - name: account_id
+        description: Primary key - Unique identifier for the account from Salesforce
+        tests:
+          - not_null
+          - unique
+
+      - name: account_name
+        description: Name of the account/organization
+
+      - name: account_type
+        description: Type classification (e.g., Customer, Prospect, Partner)
+
+      - name: industry
+        description: Industry classification of the account
+
+      - name: billing_city
+        description: City of billing address
+
+      - name: billing_state
+        description: State/Province of billing address
+
+      - name: billing_country
+        description: Country of billing address
+
+      - name: month_start_date
+        description: First day of the month period this row represents
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["1st day of month"]
+
+      - name: total_revenue_amount
+        description: Total won opportunity revenue for the period (full month historical, MTD current)
+        data_type: numeric
+        data_tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "total_revenue_amount >= 0 or total_revenue_amount is null"
+              severity: error
+
+      - name: mtd_revenue_amount
+        description: Month-to-date won revenue (only populated for current month, NULL otherwise)
+        data_type: numeric
+
+      - name: pipeline_amount
+        description: Total value of open (not closed) opportunities for the period
+        data_type: numeric
+        data_tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "pipeline_amount >= 0 or pipeline_amount is null"
+              severity: error
+
+      - name: mtd_pipeline_amount
+        description: Month-to-date pipeline value (only populated for current month, NULL otherwise)
+        data_type: numeric
+
+      - name: opportunity_count
+        description: Total count of non-deleted opportunities for the account in this period
+        data_type: integer
+        data_tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "opportunity_count >= 0 or opportunity_count is null"
+              severity: error
+
+      - name: won_opportunity_count
+        description: Count of closed-won opportunities in the period
+        data_type: integer
+
+      - name: open_opportunity_count
+        description: Count of open (not closed) opportunities in the period
+        data_type: integer
+
+      - name: win_rate_pct
+        description: |
+          Percentage of won opportunities out of total.
+          NULL when no opportunities exist for the account in this period.
+          Formula: (won_opportunity_count / opportunity_count) * 100
+        data_type: float
+        data_tests:
+          - dbt_utils.expression_is_true:
+              expression: "(win_rate_pct IS NULL OR (win_rate_pct >= 0 AND win_rate_pct <= 100))"
+              severity: error
+
+      - name: avg_won_deal_size
+        description: Average deal size for won opportunities only. NULL when no won deals.
+        data_type: numeric
+
+      - name: is_current_month
+        description: Flag indicating whether this row represents current month (MTD data)
+        data_type: boolean
